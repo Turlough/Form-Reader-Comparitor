@@ -1,6 +1,4 @@
-def main():
-    print("Hello from form-reader-comparitor-llm!")
-
+from form_reader.main import main
 
 if __name__ == "__main__":
     main()
