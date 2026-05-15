@@ -14,7 +14,7 @@ The subset of readers used in any run is configurable. Results for each run are 
 
 Separately from evaluation code, natural language is used to query the results database. This app is web based and can choose a separate LLM for analysis.
 
-## Stage 1
+## Stage 2
 Batches are presented as a comma separated text file, EXPORT.TXT that provides a ground-truth index of expected values.
 
 EXPORT.TXT does not have column headings. Col[0] on each row is always the relative path to the image.
@@ -23,7 +23,7 @@ The image may be a multipage TIFF or PDF, but only the first page is read.
 
 The natural language results query is limited to one appropriate model that can handle statistical queries well.
 
-### Stage 1 objectives
+### Stage 2 objectives
 - Create a desktop python app (PyQt6) that allows the user to:
     - Import EXPORT.TXT
     - Select a subset of OCR techniques.

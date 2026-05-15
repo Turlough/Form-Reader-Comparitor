@@ -1,10 +1,10 @@
-# Plan: Form reader comparitor — Stage 1 and foundations
+# Plan: Form reader comparitor — Stage 2 and foundations
 
 This document turns `README.md` into an implementable roadmap. No code assumptions beyond what follows.
 
 ---
 
-## Goals (Stage 1)
+## Goals (Stage 2)
 
 1. **Desktop app (PyQt6)**  
    Import ground truth from CSV, configure which OCR/readers run, create each **run** with a **name** and **description** (for retrospective lists and reports), execute with the chosen timing strategy, persist results and per-row metrics (Levenshtein vs ground truth).
