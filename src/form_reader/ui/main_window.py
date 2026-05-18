@@ -107,7 +107,7 @@ class MainWindow(QMainWindow):
         self._define_action.triggered.connect(self._define_fields)
         fields_menu.addAction(self._define_action)
 
-        field_menu = bar.addMenu("Fiel&d")
+        field_menu = bar.addMenu("&Run")
         self._read_batch_action = QAction("&Read Batch", self)
         self._read_batch_action.triggered.connect(self._start_batch)
         self._pause_action = QAction("&Pause", self)
