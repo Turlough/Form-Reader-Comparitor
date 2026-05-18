@@ -7,6 +7,7 @@ from PyQt6.QtCore import QMutex, QMutexLocker, QThread, pyqtSignal
 
 from ..models.batch import Batch
 from ..models.fields_config import FieldConfig
+from ..services.gemini_client import GeminiClient
 from ..services.image_loader import image_to_png_bytes, load_first_page_image, placeholder_image
 from ..services.ollama_client import OllamaClient
 
@@ -29,6 +30,7 @@ class BatchWorker(QThread):
         batch: Batch,
         model: str,
         ollama: OllamaClient,
+        gemini: GeminiClient | None = None,
         start_at: BatchPosition | None = None,
         parent=None,
     ) -> None:
@@ -36,6 +38,7 @@ class BatchWorker(QThread):
         self._batch = batch
         self._model = model
         self._ollama = ollama
+        self._gemini = gemini
         self._mutex = QMutex()
         self._paused = False
         self._stopped = False
@@ -142,6 +145,16 @@ class BatchWorker(QThread):
         image = load_first_page_image(path) or placeholder_image()
         png = image_to_png_bytes(image)
         prompt = field.prompt.strip() or f"What is the value for {field.name}?"
+        api_model = GeminiClient.strip_menu_prefix(self._model)
+        if api_model is not None:
+            if not self._gemini or not self._gemini.is_configured:
+                raise RuntimeError("Gemini is not configured (set GEMINI_API_KEY).")
+            return self._gemini.extract_field(
+                api_model,
+                prompt,
+                png,
+                should_cancel=self._should_cancel,
+            )
         return self._ollama.extract_field(
             self._model,
             prompt,

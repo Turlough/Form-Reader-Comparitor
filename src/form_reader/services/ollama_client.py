@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from typing import Callable
 
 import httpx
@@ -11,8 +12,9 @@ DEFAULT_MODEL = "glm-ocr"
 
 
 class OllamaClient:
-    def __init__(self, host: str = DEFAULT_HOST, timeout: float = 300.0) -> None:
-        self.host = host.rstrip("/")
+    def __init__(self, host: str | None = None, timeout: float = 300.0) -> None:
+        resolved = (host or os.environ.get("OLLAMA_HOST") or DEFAULT_HOST).strip()
+        self.host = resolved.rstrip("/")
         self.timeout = timeout
 
     def list_models(self) -> list[str]:

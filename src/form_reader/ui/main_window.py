@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 from ..models.batch import Batch
 from ..models.fields_config import FieldConfig, FieldsConfig, save_fields_config
 from ..services.export_parser import parse_export_txt
+from ..services.gemini_client import GeminiClient
 from ..services.ollama_client import DEFAULT_MODEL, OllamaClient
 from .batch_worker import BatchPosition, BatchWorker
 from .define_fields_dialog import DefineFieldsDialog
@@ -43,6 +44,7 @@ class MainWindow(QMainWindow):
 
         self._settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         self._ollama = OllamaClient()
+        self._gemini = GeminiClient()
         self._batch: Batch | None = None
         self._worker: BatchWorker | None = None
         self._model = DEFAULT_MODEL
@@ -319,23 +321,37 @@ class MainWindow(QMainWindow):
             self._llm_menu.removeAction(action)
         self._model_actions.clear()
 
+        ollama_models: list[str] = []
+        ollama_error: str | None = None
         try:
-            models = self._ollama.list_models()
+            ollama_models = self._ollama.list_models()
         except Exception as exc:
-            placeholder = QAction(f"(Ollama unavailable: {exc})", self)
+            ollama_error = str(exc)
+
+        gemini_models = self._gemini.list_menu_models()
+        all_models = [*ollama_models, *gemini_models]
+
+        if not all_models:
+            if ollama_error:
+                msg = f"(no models: Ollama: {ollama_error}"
+                if not self._gemini.is_configured:
+                    msg += "; Gemini: set GEMINI_API_KEY in .env"
+                msg += ")"
+            else:
+                msg = "(no models: configure Ollama or GEMINI_API_KEY)"
+            placeholder = QAction(msg, self)
             placeholder.setEnabled(False)
             self._llm_menu.addAction(placeholder)
             self._model_actions.append(placeholder)
             return
 
-        if not models:
-            empty = QAction("(no models)", self)
-            empty.setEnabled(False)
-            self._llm_menu.addAction(empty)
-            self._model_actions.append(empty)
-            return
+        if ollama_error:
+            warn = QAction(f"(Ollama unavailable: {ollama_error})", self)
+            warn.setEnabled(False)
+            self._llm_menu.addAction(warn)
+            self._model_actions.append(warn)
 
-        for name in models:
+        for name in ollama_models:
             action = QAction(name, self)
             action.setCheckable(True)
             action.setChecked(name == self._model or name.startswith(self._model))
@@ -343,8 +359,20 @@ class MainWindow(QMainWindow):
             self._llm_menu.addAction(action)
             self._model_actions.append(action)
 
-        if self._model not in models and models:
-            self._model = models[0]
+        if gemini_models and ollama_models:
+            sep = self._llm_menu.addSeparator()
+            self._model_actions.append(sep)
+
+        for name in gemini_models:
+            action = QAction(name, self)
+            action.setCheckable(True)
+            action.setChecked(name == self._model)
+            action.triggered.connect(lambda checked, m=name: self._select_model(m))
+            self._llm_menu.addAction(action)
+            self._model_actions.append(action)
+
+        if self._model not in all_models and all_models:
+            self._model = all_models[0]
 
     def _select_model(self, model: str) -> None:
         self._model = model
@@ -370,7 +398,13 @@ class MainWindow(QMainWindow):
             row.read_values.clear()
 
         self._repopulate_table_values()
-        self._worker = BatchWorker(self._batch, self._model, self._ollama, parent=self)
+        self._worker = BatchWorker(
+            self._batch,
+            self._model,
+            self._ollama,
+            gemini=self._gemini,
+            parent=self,
+        )
         self._worker.cell_started.connect(self._on_cell_started)
         self._worker.cell_completed.connect(self._on_cell_completed)
         self._worker.cell_failed.connect(self._on_cell_failed)
