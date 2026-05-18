@@ -17,7 +17,7 @@ def parse_export_txt(export_path: Path) -> Batch:
         for line in reader:
             if not line:
                 continue
-            relative_path = line[0].strip()
+            relative_path = _normalize_relative_path(line[0].strip())
             values = [cell.strip() for cell in line[1:]]
             max_cols = max(max_cols, len(values))
             rows.append(BatchRow(relative_path=relative_path, ground_truth=values))
@@ -44,3 +44,14 @@ def parse_export_txt(export_path: Path) -> Batch:
         fields_config=fields_config,
         column_count=max_cols,
     )
+
+
+def _normalize_relative_path(raw: str) -> str:
+    """Normalize Windows-style separators so the path resolves cross-platform.
+
+    EXPORT.TXT is typically produced by Windows scanning software and may contain
+    backslashes (e.g. ``IMAGES\\SCAN001.TIF``). On Linux ``Path`` treats those as
+    literal characters in a single filename, which prevents the image from being
+    located. Translating to forward slashes still works on Windows.
+    """
+    return raw.replace("\\", "/")

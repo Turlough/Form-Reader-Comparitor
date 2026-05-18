@@ -6,23 +6,64 @@ from pathlib import Path
 from PIL import Image
 from PyQt6.QtGui import QImage
 
-_PLACEHOLDER_SIZE = (400, 300)
+_PLACEHOLDER_SIZE = (720, 360)
 # Keep display decode bounded so import does not hang/OOM on large scans.
 _MAX_DISPLAY_PIXELS = 12_000_000
 
 
 def load_first_page_image(path: Path) -> Image.Image | None:
-    if not path.is_file():
+    """Load the first page as an RGB PIL image.
+
+    Returns ``None`` if the file cannot be located. Raises ``OSError`` /
+    ``ValueError`` (from Pillow / PyMuPDF) on decode failure so callers can
+    surface a useful diagnostic instead of a generic placeholder.
+    """
+    resolved = _resolve_case_insensitive(path)
+    if resolved is None:
         return None
-    suffix = path.suffix.lower()
-    try:
-        if suffix == ".pdf":
-            image = _load_pdf_first_page(path)
-        else:
-            image = _load_raster(path)
-        return _limit_image_size(image) if image is not None else None
-    except Exception:
-        return None
+    suffix = resolved.suffix.lower()
+    if suffix == ".pdf":
+        image = _load_pdf_first_page(resolved)
+    else:
+        image = _load_raster(resolved)
+    return _limit_image_size(image)
+
+
+def _resolve_case_insensitive(path: Path) -> Path | None:
+    """Return ``path`` if it exists, otherwise try a case-insensitive lookup.
+
+    Windows-produced EXPORT.TXT files often use a different filename case than the
+    actual files on a Linux filesystem (e.g. ``SCAN001.TIF`` vs ``scan001.tif``).
+    Walk the path components, matching each one case-insensitively against the
+    real directory entries.
+    """
+    if path.is_file():
+        return path
+
+    if path.is_absolute():
+        current = Path(path.anchor)
+        parts = path.relative_to(current).parts
+    else:
+        current = Path()
+        parts = path.parts
+
+    for part in parts:
+        probe = current / part
+        if probe.exists():
+            current = probe
+            continue
+        search_dir = current if str(current) else Path(".")
+        try:
+            entries = list(search_dir.iterdir())
+        except (FileNotFoundError, NotADirectoryError, PermissionError):
+            return None
+        lowered = part.lower()
+        match = next((entry for entry in entries if entry.name.lower() == lowered), None)
+        if match is None:
+            return None
+        current = match
+
+    return current if current.is_file() else None
 
 
 def pil_to_qimage(image: Image.Image) -> QImage:
@@ -69,13 +110,20 @@ def _load_pdf_first_page(path: Path) -> Image.Image:
 
 
 def _load_raster(path: Path) -> Image.Image:
+    """Open a raster and return its first frame as a fully-detached RGB image.
+
+    Multi-page scanned TIFFs are common here and can use modes such as ``1``
+    (CCITT G4 bilevel), ``L``, ``P``, ``I;16`` or ``CMYK``. We force a load
+    while the source file is still open, then convert to RGB so the returned
+    image is safe to use after the file handle is closed.
+    """
     with Image.open(path) as img:
-        img.seek(0)
-        if img.mode not in ("RGB", "RGBA"):
-            converted = img.convert("RGB")
-        else:
-            converted = img.convert("RGB") if img.mode == "RGBA" else img.copy()
-        return converted
+        if getattr(img, "n_frames", 1) > 1:
+            img.seek(0)
+        img.load()
+        if img.mode == "RGB":
+            return img.copy()
+        return img.convert("RGB")
 
 
 def placeholder_image(message: str = "Image not found") -> Image.Image:

@@ -112,14 +112,25 @@ class ImagePanel(QWidget):
             self._field_config = field
             self._apply_fit_buttons(field.view.mode)
 
+        raw = str(relative_or_absolute)
         path = Path(relative_or_absolute)
         if not path.is_absolute() and self._batch_dir:
             path = self._batch_dir / path
         self._current_path = path
 
-        image = load_first_page_image(path)
-        if image is None:
-            image = placeholder_image(f"Cannot load:\n{path.name}")
+        try:
+            image = load_first_page_image(path)
+        except Exception as exc:
+            image = placeholder_image(
+                f"Cannot decode:\n{path.name}\n\n{type(exc).__name__}: {exc}"
+            )
+        else:
+            if image is None:
+                image = placeholder_image(
+                    "File not found.\n"
+                    f"Raw entry: {raw!r}\n"
+                    f"Resolved : {path}"
+                )
         self._source_image = image
         self._display_image()
         self._gt_text.setPlainText(ground_truth)
