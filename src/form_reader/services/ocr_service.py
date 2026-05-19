@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PIL import Image
@@ -10,11 +13,34 @@ if TYPE_CHECKING:
     from paddleocr import PaddleOCR
 
 OCR_ENGINE_PADDLE = "paddle"
+OCR_ENGINE_TESSERACT = "tesseract"
 DEFAULT_OCR_ENGINE = OCR_ENGINE_PADDLE
 
 OCR_MENU_ENGINES: list[tuple[str, str]] = [
     ("Paddle", OCR_ENGINE_PADDLE),
+    ("Tesseract", OCR_ENGINE_TESSERACT),
 ]
+
+_TESSERACT_WINDOWS_CANDIDATES = (
+    Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
+    Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
+)
+
+
+def _resolve_tesseract_cmd() -> str:
+    env_cmd = os.environ.get("TESSERACT_CMD", "").strip()
+    if env_cmd:
+        return env_cmd
+
+    on_path = shutil.which("tesseract")
+    if on_path:
+        return on_path
+
+    for candidate in _TESSERACT_WINDOWS_CANDIDATES:
+        if candidate.is_file():
+            return str(candidate)
+
+    return "tesseract"
 
 
 class OcrService:
@@ -30,6 +56,8 @@ class OcrService:
         crop = crop_normalized_rectangle(image, rectangle)
         if engine == OCR_ENGINE_PADDLE:
             return self._read_paddle(crop)
+        if engine == OCR_ENGINE_TESSERACT:
+            return self._read_tesseract(crop)
         raise ValueError(f"Unknown OCR engine: {engine}")
 
     def _get_paddle(self) -> PaddleOCR:
@@ -50,6 +78,24 @@ class OcrService:
                 enable_mkldnn=False,
             )
         return self._paddle
+
+    def _read_tesseract(self, image: Image.Image) -> str:
+        try:
+            import pytesseract
+        except ImportError as exc:
+            raise RuntimeError(
+                "pytesseract is not installed. Install with: pip install pytesseract"
+            ) from exc
+        pytesseract.pytesseract.tesseract_cmd = _resolve_tesseract_cmd()
+        try:
+            return pytesseract.image_to_string(image).strip()
+        except pytesseract.TesseractNotFoundError as exc:
+            cmd = pytesseract.pytesseract.tesseract_cmd
+            raise RuntimeError(
+                f"Tesseract executable not found (tried: {cmd!r}). "
+                "Install from https://github.com/tesseract-ocr/tesseract, "
+                "add it to PATH, or set TESSERACT_CMD to the full path of tesseract.exe"
+            ) from exc
 
     def _read_paddle(self, image: Image.Image) -> str:
         import numpy as np
