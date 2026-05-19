@@ -139,3 +139,14 @@ def image_to_png_bytes(image: Image.Image) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def crop_normalized_rectangle(image: Image.Image, rect: list[float]) -> Image.Image:
+    """Crop using normalized ``[x, y, w, h]`` coordinates (0–1)."""
+    x, y, w, h = rect
+    iw, ih = image.size
+    left = max(0, min(iw - 1, int(x * iw)))
+    top = max(0, min(ih - 1, int(y * ih)))
+    right = max(left + 1, min(iw, int((x + w) * iw)))
+    bottom = max(top + 1, min(ih, int((y + h) * ih)))
+    return image.crop((left, top, right, bottom))

@@ -57,6 +57,13 @@ class FieldConfig:
             return self.name.strip()
         return str(self.column)
 
+    def has_rectangle(self) -> bool:
+        rect = self.view.rectangle
+        if not rect or len(rect) != 4:
+            return False
+        _, _, w, h = rect
+        return w > 0 and h > 0
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "column": self.column,

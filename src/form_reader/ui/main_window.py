@@ -24,10 +24,12 @@ from ..models.batch import Batch
 from ..models.fields_config import FieldConfig, FieldsConfig, save_fields_config
 from ..services.export_parser import parse_export_txt
 from ..services.gemini_client import GeminiClient
+from ..services.ocr_service import DEFAULT_OCR_ENGINE, OCR_MENU_ENGINES, OcrService
 from ..services.ollama_client import DEFAULT_MODEL, OllamaClient
 from .batch_worker import BatchPosition, BatchWorker
 from .define_fields_dialog import DefineFieldsDialog
 from .image_panel import ImagePanel
+from .ocr_batch_worker import OcrBatchWorker
 
 SETTINGS_ORG = "Digidoocs"
 SETTINGS_APP = "FormReaderComparitor"
@@ -45,9 +47,11 @@ class MainWindow(QMainWindow):
         self._settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         self._ollama = OllamaClient()
         self._gemini = GeminiClient()
+        self._ocr = OcrService()
         self._batch: Batch | None = None
-        self._worker: BatchWorker | None = None
+        self._worker: BatchWorker | OcrBatchWorker | None = None
         self._model = DEFAULT_MODEL
+        self._ocr_engine = DEFAULT_OCR_ENGINE
         self._fields_defined = False
         self._current_field_column = 1
         self._reading_cell: tuple[int, int] | None = None
@@ -93,6 +97,7 @@ class MainWindow(QMainWindow):
         self._wire_signals()
         self._update_batch_actions()
         self._refresh_llm_menu()
+        self._refresh_ocr_menu()
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
@@ -130,6 +135,13 @@ class MainWindow(QMainWindow):
         self._llm_menu.addAction(self._llm_read_action)
         self._llm_menu.addSeparator()
         self._model_actions: list[QAction] = []
+
+        self._ocr_menu = bar.addMenu("&OCR")
+        self._ocr_read_action = QAction("&Read", self)
+        self._ocr_read_action.triggered.connect(self._start_ocr_batch)
+        self._ocr_menu.addAction(self._ocr_read_action)
+        self._ocr_menu.addSeparator()
+        self._ocr_engine_actions: list[QAction] = []
 
     def _wire_signals(self) -> None:
         self._file_list.currentRowChanged.connect(self._on_file_selected)
@@ -379,6 +391,84 @@ class MainWindow(QMainWindow):
         for action in self._model_actions:
             action.setChecked(action.text() == model)
 
+    def _refresh_ocr_menu(self) -> None:
+        for action in self._ocr_engine_actions:
+            self._ocr_menu.removeAction(action)
+        self._ocr_engine_actions.clear()
+
+        for label, engine_id in OCR_MENU_ENGINES:
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(engine_id == self._ocr_engine)
+            action.triggered.connect(
+                lambda checked, e=engine_id: self._select_ocr_engine(e)
+            )
+            self._ocr_menu.addAction(action)
+            self._ocr_engine_actions.append(action)
+
+    def _select_ocr_engine(self, engine: str) -> None:
+        self._ocr_engine = engine
+        for action, (_, engine_id) in zip(self._ocr_engine_actions, OCR_MENU_ENGINES):
+            action.setChecked(engine_id == engine)
+
+    def _active_fields_missing_rectangle(self) -> list[str]:
+        if not self._batch:
+            return []
+        missing: list[str] = []
+        for field in self._batch.fields_config.fields:
+            if field.active and not field.has_rectangle():
+                missing.append(field.display_label(self._fields_defined))
+        return missing
+
+    def _start_ocr_batch(self) -> None:
+        if not self._batch:
+            QMessageBox.information(self, "No batch", "Import EXPORT.TXT first.")
+            return
+        if not self._fields_defined:
+            QMessageBox.warning(
+                self,
+                "Define fields",
+                "Use Fields → Define and save all field names before reading.",
+            )
+            return
+        missing = self._active_fields_missing_rectangle()
+        if missing:
+            if len(missing) == 1:
+                text = (
+                    f'The active field "{missing[0]}" does not have a rectangle specified.\n\n'
+                    "Draw a rectangle (Ctrl+drag on the image) for each active field before OCR."
+                )
+            else:
+                names = "\n".join(f"  • {name}" for name in missing)
+                text = (
+                    "The following active fields do not have a rectangle specified:\n"
+                    f"{names}\n\n"
+                    "Draw a rectangle (Ctrl+drag on the image) for each active field before OCR."
+                )
+            QMessageBox.warning(self, "Rectangle required", text)
+            return
+        if self._worker and self._worker.isRunning():
+            return
+
+        self._batch_stopped = False
+        for row in self._batch.rows:
+            row.read_values.clear()
+
+        self._repopulate_table_values()
+        self._worker = OcrBatchWorker(
+            self._batch,
+            self._ocr_engine,
+            self._ocr,
+            parent=self,
+        )
+        self._worker.cell_started.connect(self._on_cell_started)
+        self._worker.cell_completed.connect(self._on_cell_completed)
+        self._worker.cell_failed.connect(self._on_cell_failed)
+        self._worker.batch_finished.connect(self._on_batch_finished)
+        self._worker.batch_stopped.connect(self._on_batch_stopped)
+        self._worker.start()
+        self._update_batch_actions(running=True)
+
     def _start_batch(self) -> None:
         if not self._batch:
             QMessageBox.information(self, "No batch", "Import EXPORT.TXT first.")
@@ -486,6 +576,7 @@ class MainWindow(QMainWindow):
         can_read = has_batch and self._fields_defined and not running
         self._read_batch_action.setEnabled(can_read)
         self._llm_read_action.setEnabled(can_read)
+        self._ocr_read_action.setEnabled(can_read)
         pause_enabled = running and not paused and not self._batch_stopped
         resume_enabled = running and paused and not self._batch_stopped
         stop_enabled = running
