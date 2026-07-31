@@ -40,44 +40,18 @@ class GeminiClient:
             return menu_model[len(GEMINI_MENU_PREFIX) :]
         return None
 
-    def extract_field(
+    def _generate_content(
         self,
         api_model: str,
-        prompt: str,
-        image_png: bytes,
+        parts: list[dict],
         *,
         should_cancel: Callable[[], bool] | None = None,
     ) -> str:
-        if should_cancel and should_cancel():
-            raise InterruptedError("Cancelled")
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not set")
 
         url = f"{self._BASE}/models/{api_model}:generateContent"
-        logger.debug(
-            "Gemini extract_field model=%r prompt=%r image_bytes=%d url=%s",
-            api_model,
-            prompt,
-            len(image_png),
-            url,
-        )
-
-        b64 = base64.b64encode(image_png).decode("ascii")
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inlineData": {
-                                "mimeType": "image/png",
-                                "data": b64,
-                            },
-                        },
-                    ],
-                }
-            ],
-        }
+        payload = {"contents": [{"parts": parts}]}
 
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(url, params={"key": self.api_key}, json=payload)
@@ -110,8 +84,56 @@ class GeminiClient:
         text = _concat_response_text(data)
         if should_cancel and should_cancel():
             raise InterruptedError("Cancelled")
-        logger.debug("Gemini extract_field result=%r", text)
         return text
+
+    def complete_text(
+        self,
+        api_model: str,
+        prompt: str,
+        *,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> str:
+        if should_cancel and should_cancel():
+            raise InterruptedError("Cancelled")
+
+        logger.debug("Gemini complete_text model=%r prompt=%r", api_model, prompt)
+        result = self._generate_content(
+            api_model,
+            [{"text": prompt}],
+            should_cancel=should_cancel,
+        )
+        logger.debug("Gemini complete_text result=%r", result)
+        return result
+
+    def extract_field(
+        self,
+        api_model: str,
+        prompt: str,
+        image_png: bytes,
+        *,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> str:
+        if should_cancel and should_cancel():
+            raise InterruptedError("Cancelled")
+
+        logger.debug(
+            "Gemini extract_field model=%r prompt=%r image_bytes=%d",
+            api_model,
+            prompt,
+            len(image_png),
+        )
+
+        b64 = base64.b64encode(image_png).decode("ascii")
+        result = self._generate_content(
+            api_model,
+            [
+                {"text": prompt},
+                {"inlineData": {"mimeType": "image/png", "data": b64}},
+            ],
+            should_cancel=should_cancel,
+        )
+        logger.debug("Gemini extract_field result=%r", result)
+        return result
 
 
 def _concat_response_text(data: dict) -> str:

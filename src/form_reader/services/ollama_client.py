@@ -56,38 +56,15 @@ class OllamaClient:
         logger.debug("Ollama list_models returned %d models: %s", len(models), models)
         return models
 
-    def extract_field(
+    def _stream_chat(
         self,
         model: str,
-        prompt: str,
-        image_png: bytes,
+        messages: list[dict],
         *,
         should_cancel: Callable[[], bool] | None = None,
     ) -> str:
-        if should_cancel and should_cancel():
-            raise InterruptedError("Cancelled")
-
         url = f"{self.host}/api/chat"
-        logger.debug(
-            "Ollama extract_field model=%r prompt=%r image_bytes=%d url=%s",
-            model,
-            prompt,
-            len(image_png),
-            url,
-        )
-
-        b64 = base64.b64encode(image_png).decode("ascii")
-        payload = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                    "images": [b64],
-                }
-            ],
-            "stream": True,
-        }
+        payload = {"model": model, "messages": messages, "stream": True}
 
         parts: list[str] = []
         with httpx.Client(timeout=self.timeout) as client:
@@ -117,6 +94,50 @@ class OllamaClient:
                     if data.get("done"):
                         break
 
-        result = "".join(parts).strip()
+        return "".join(parts).strip()
+
+    def complete_text(
+        self,
+        model: str,
+        prompt: str,
+        *,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> str:
+        if should_cancel and should_cancel():
+            raise InterruptedError("Cancelled")
+
+        logger.debug("Ollama complete_text model=%r prompt=%r", model, prompt)
+        result = self._stream_chat(
+            model,
+            [{"role": "user", "content": prompt}],
+            should_cancel=should_cancel,
+        )
+        logger.debug("Ollama complete_text result=%r", result)
+        return result
+
+    def extract_field(
+        self,
+        model: str,
+        prompt: str,
+        image_png: bytes,
+        *,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> str:
+        if should_cancel and should_cancel():
+            raise InterruptedError("Cancelled")
+
+        logger.debug(
+            "Ollama extract_field model=%r prompt=%r image_bytes=%d",
+            model,
+            prompt,
+            len(image_png),
+        )
+
+        b64 = base64.b64encode(image_png).decode("ascii")
+        result = self._stream_chat(
+            model,
+            [{"role": "user", "content": prompt, "images": [b64]}],
+            should_cancel=should_cancel,
+        )
         logger.debug("Ollama extract_field result=%r", result)
         return result

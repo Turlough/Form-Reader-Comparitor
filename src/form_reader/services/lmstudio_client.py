@@ -147,45 +147,16 @@ class LmStudioClient:
         )
         return resolved
 
-    def extract_field(
+    def _chat_completion(
         self,
         api_model: str,
-        prompt: str,
-        image_png: bytes,
+        messages: list[dict],
         *,
         should_cancel: Callable[[], bool] | None = None,
     ) -> str:
-        if should_cancel and should_cancel():
-            raise InterruptedError("Cancelled")
-
         request_model = self.resolve_request_model(api_model)
         url = f"{self.host}/v1/chat/completions"
-        logger.debug(
-            "LM Studio extract_field api_model=%r request_model=%r "
-            "prompt=%r image_bytes=%d url=%s",
-            api_model,
-            request_model,
-            prompt,
-            len(image_png),
-            url,
-        )
-
-        b64 = base64.b64encode(image_png).decode("ascii")
-        payload = {
-            "model": request_model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{b64}"},
-                        },
-                    ],
-                }
-            ],
-        }
+        payload = {"model": request_model, "messages": messages}
 
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(url, json=payload)
@@ -225,8 +196,62 @@ class LmStudioClient:
                 for part in content
                 if isinstance(part, dict) and part.get("type") == "text"
             ]
-            result = "".join(parts).strip()
-        else:
-            result = str(content).strip()
+            return "".join(parts).strip()
+        return str(content).strip()
+
+    def complete_text(
+        self,
+        api_model: str,
+        prompt: str,
+        *,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> str:
+        if should_cancel and should_cancel():
+            raise InterruptedError("Cancelled")
+
+        logger.debug("LM Studio complete_text api_model=%r prompt=%r", api_model, prompt)
+        result = self._chat_completion(
+            api_model,
+            [{"role": "user", "content": prompt}],
+            should_cancel=should_cancel,
+        )
+        logger.debug("LM Studio complete_text result=%r", result)
+        return result
+
+    def extract_field(
+        self,
+        api_model: str,
+        prompt: str,
+        image_png: bytes,
+        *,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> str:
+        if should_cancel and should_cancel():
+            raise InterruptedError("Cancelled")
+
+        logger.debug(
+            "LM Studio extract_field api_model=%r prompt=%r image_bytes=%d",
+            api_model,
+            prompt,
+            len(image_png),
+        )
+
+        b64 = base64.b64encode(image_png).decode("ascii")
+        result = self._chat_completion(
+            api_model,
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{b64}"},
+                        },
+                    ],
+                }
+            ],
+            should_cancel=should_cancel,
+        )
         logger.debug("LM Studio extract_field result=%r", result)
         return result
