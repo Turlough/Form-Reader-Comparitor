@@ -63,17 +63,42 @@ class GlmOcrChain:
 
     def ocr_page(
         self,
+        vision_model: str,
         image_png: bytes,
         *,
         should_cancel: Callable[[], bool] | None = None,
     ) -> str:
         logger.debug(
-            "GlmOcrChain ocr_page model=%r image_bytes=%d",
-            self._ocr_model,
+            "GlmOcrChain ocr_page vision_model=%r image_bytes=%d",
+            vision_model,
             len(image_png),
         )
+
+        api_model = GeminiClient.strip_menu_prefix(vision_model)
+        if api_model is not None:
+            if not self._gemini or not self._gemini.is_configured:
+                raise RuntimeError("Gemini is not configured (set GEMINI_API_KEY).")
+            return self._gemini.extract_field(
+                api_model,
+                self._ocr_prompt,
+                image_png,
+                should_cancel=should_cancel,
+            )
+
+        api_model = LmStudioClient.strip_menu_prefix(vision_model)
+        if api_model is not None:
+            if not self._lmstudio:
+                raise RuntimeError("LM Studio client is not configured.")
+            return self._lmstudio.extract_field(
+                api_model,
+                self._ocr_prompt,
+                image_png,
+                should_cancel=should_cancel,
+            )
+
+        model = vision_model or self._ocr_model
         return self._ollama.extract_field(
-            self._ocr_model,
+            model,
             self._ocr_prompt,
             image_png,
             should_cancel=should_cancel,

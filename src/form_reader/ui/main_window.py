@@ -25,7 +25,7 @@ from ..models.batch import Batch
 from ..models.fields_config import FieldConfig, FieldsConfig, save_fields_config
 from ..services.export_parser import parse_export_txt
 from ..services.gemini_client import GeminiClient
-from ..services.glm_ocr_chain import GlmOcrChain, chain_menu_id
+from ..services.glm_ocr_chain import GlmOcrChain
 from ..services.lmstudio_client import LmStudioClient
 from ..services.ocr_service import DEFAULT_OCR_ENGINE, OCR_MENU_ENGINES, OcrService
 from ..services.ollama_client import DEFAULT_MODEL, OllamaClient
@@ -61,7 +61,8 @@ class MainWindow(QMainWindow):
         self._batch: Batch | None = None
         self._worker: BatchWorker | OcrBatchWorker | GlmOcrBatchWorker | None = None
         self._model = DEFAULT_MODEL
-        self._glm_ocr_text_model = ""
+        self._chain_image_model = ""
+        self._chain_text_model = ""
         self._ocr_engine = DEFAULT_OCR_ENGINE
         self._fields_defined = False
         self._current_field_column = 1
@@ -109,7 +110,6 @@ class MainWindow(QMainWindow):
         self._update_batch_actions()
         self._refresh_llm_menu()
         self._refresh_ocr_menu()
-        self._refresh_glm_ocr_menu()
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
@@ -159,15 +159,20 @@ class MainWindow(QMainWindow):
         self._ocr_menu.addSeparator()
         self._ocr_engine_actions: list[QAction] = []
 
-        self._glm_ocr_menu = bar.addMenu("GLM-&OCR")
-        self._glm_ocr_read_action = QAction("&Read", self)
-        self._glm_ocr_read_action.triggered.connect(self._start_glm_ocr_batch)
-        self._glm_ocr_menu.addAction(self._glm_ocr_read_action)
-        self._glm_ocr_menu.addSeparator()
-        self._glm_ocr_ollama_submenu = self._glm_ocr_menu.addMenu("Text model → Ollama")
-        self._glm_ocr_lmstudio_submenu = self._glm_ocr_menu.addMenu("Text model → LM Studio")
-        self._glm_ocr_cloud_submenu = self._glm_ocr_menu.addMenu("Text model → Cloud")
-        self._glm_ocr_model_actions: list[QAction] = []
+        self._chain_menu = bar.addMenu("&Chain")
+        self._chain_read_action = QAction("&Read", self)
+        self._chain_read_action.triggered.connect(self._start_chain_batch)
+        self._chain_menu.addAction(self._chain_read_action)
+        self._chain_menu.addSeparator()
+        self._chain_image_ollama_submenu = self._chain_menu.addMenu("Image → Ollama")
+        self._chain_image_lmstudio_submenu = self._chain_menu.addMenu("Image → LM Studio")
+        self._chain_image_cloud_submenu = self._chain_menu.addMenu("Image → Cloud")
+        self._chain_menu.addSeparator()
+        self._chain_text_ollama_submenu = self._chain_menu.addMenu("Text → Ollama")
+        self._chain_text_lmstudio_submenu = self._chain_menu.addMenu("Text → LM Studio")
+        self._chain_text_cloud_submenu = self._chain_menu.addMenu("Text → Cloud")
+        self._chain_image_model_actions: list[QAction] = []
+        self._chain_text_model_actions: list[QAction] = []
 
     def _wire_signals(self) -> None:
         self._file_list.currentRowChanged.connect(self._on_file_selected)
@@ -378,12 +383,6 @@ class MainWindow(QMainWindow):
         action.setEnabled(False)
         submenu.addAction(action)
 
-    def _add_glm_ocr_placeholder(self, submenu: QMenu, text: str) -> None:
-        action = QAction(text, self)
-        action.setEnabled(False)
-        submenu.addAction(action)
-        self._glm_ocr_model_actions.append(action)
-
     def _refresh_llm_menu(self) -> None:
         self._clear_llm_submenus()
 
@@ -436,6 +435,8 @@ class MainWindow(QMainWindow):
 
         self._add_placeholder(self._runpod_submenu, "(not configured)")
 
+        self._refresh_chain_menu()
+
         if self._model not in all_models and all_models:
             self._model = all_models[0]
             for action in self._model_actions:
@@ -470,28 +471,52 @@ class MainWindow(QMainWindow):
         for action, (_, engine_id) in zip(self._ocr_engine_actions, OCR_MENU_ENGINES):
             action.setChecked(engine_id == engine)
 
-    def _clear_glm_ocr_submenus(self) -> None:
+    def _clear_chain_submenus(self) -> None:
         for submenu in (
-            self._glm_ocr_ollama_submenu,
-            self._glm_ocr_lmstudio_submenu,
-            self._glm_ocr_cloud_submenu,
+            self._chain_image_ollama_submenu,
+            self._chain_image_lmstudio_submenu,
+            self._chain_image_cloud_submenu,
+            self._chain_text_ollama_submenu,
+            self._chain_text_lmstudio_submenu,
+            self._chain_text_cloud_submenu,
         ):
             submenu.clear()
-        self._glm_ocr_model_actions.clear()
+        self._chain_image_model_actions.clear()
+        self._chain_text_model_actions.clear()
 
-    def _add_glm_ocr_model_action(self, submenu: QMenu, model_id: str, label: str) -> None:
+    def _add_chain_placeholder(self, submenu: QMenu, text: str, *, image: bool) -> None:
+        action = QAction(text, self)
+        action.setEnabled(False)
+        submenu.addAction(action)
+        if image:
+            self._chain_image_model_actions.append(action)
+        else:
+            self._chain_text_model_actions.append(action)
+
+    def _add_chain_model_action(
+        self,
+        submenu: QMenu,
+        model_id: str,
+        label: str,
+        *,
+        image: bool,
+    ) -> None:
+        selected = self._chain_image_model if image else self._chain_text_model
         action = QAction(label, self)
         action.setData(model_id)
         action.setCheckable(True)
-        action.setChecked(model_id == self._glm_ocr_text_model)
-        action.triggered.connect(lambda checked, m=model_id: self._select_glm_ocr_text_model(m))
+        action.setChecked(model_id == selected)
+        if image:
+            action.triggered.connect(lambda checked, m=model_id: self._select_chain_image_model(m))
+            self._chain_image_model_actions.append(action)
+        else:
+            action.triggered.connect(lambda checked, m=model_id: self._select_chain_text_model(m))
+            self._chain_text_model_actions.append(action)
         submenu.addAction(action)
-        self._glm_ocr_model_actions.append(action)
 
-    def _default_glm_ocr_text_model(self, ollama_models: list[str]) -> str:
-        for name in ollama_models:
-            if name != DEFAULT_MODEL:
-                return name
+    def _default_chain_image_model(self, ollama_models: list[str]) -> str:
+        if DEFAULT_MODEL in ollama_models:
+            return DEFAULT_MODEL
         if ollama_models:
             return ollama_models[0]
         lmstudio_models = self._lmstudio.list_menu_models()
@@ -502,8 +527,101 @@ class MainWindow(QMainWindow):
             return cloud_models[0]
         return ""
 
-    def _refresh_glm_ocr_menu(self) -> None:
-        self._clear_glm_ocr_submenus()
+    def _default_chain_text_model(
+        self,
+        ollama_models: list[str],
+        image_model: str,
+    ) -> str:
+        for name in ollama_models:
+            if name != image_model:
+                return name
+        if ollama_models:
+            return ollama_models[0]
+        lmstudio_models = self._lmstudio.list_menu_models()
+        for model_id in lmstudio_models:
+            if model_id != image_model:
+                return model_id
+        if lmstudio_models:
+            return lmstudio_models[0]
+        cloud_models = self._gemini.list_menu_models()
+        for name in cloud_models:
+            if name != image_model:
+                return name
+        if cloud_models:
+            return cloud_models[0]
+        return ""
+
+    def _populate_chain_model_submenus(
+        self,
+        *,
+        image: bool,
+        ollama_submenu: QMenu,
+        lmstudio_submenu: QMenu,
+        cloud_submenu: QMenu,
+        ollama_models: list[str],
+        ollama_error: str | None,
+        lmstudio_models: list[str],
+        lmstudio_labels: dict[str, str],
+        cloud_models: list[str],
+    ) -> None:
+        if ollama_error:
+            self._add_chain_placeholder(
+                ollama_submenu,
+                f"(unavailable: {ollama_error})",
+                image=image,
+            )
+        elif not ollama_models:
+            self._add_chain_placeholder(ollama_submenu, "(no models)", image=image)
+        else:
+            for name in ollama_models:
+                self._add_chain_model_action(
+                    ollama_submenu,
+                    name,
+                    name,
+                    image=image,
+                )
+
+        if not lmstudio_models:
+            if self._lmstudio.models_dir.is_dir():
+                self._add_chain_placeholder(
+                    lmstudio_submenu,
+                    "(no GGUF models found)",
+                    image=image,
+                )
+            else:
+                self._add_chain_placeholder(
+                    lmstudio_submenu,
+                    f"(models folder not found: {self._lmstudio.models_dir})",
+                    image=image,
+                )
+        else:
+            for model_id in lmstudio_models:
+                label = lmstudio_labels.get(model_id, model_id)
+                self._add_chain_model_action(
+                    lmstudio_submenu,
+                    model_id,
+                    label,
+                    image=image,
+                )
+
+        if not cloud_models:
+            self._add_chain_placeholder(
+                cloud_submenu,
+                "(set GEMINI_API_KEY in .env)",
+                image=image,
+            )
+        else:
+            for name in cloud_models:
+                display = name.split(":", 1)[-1]
+                self._add_chain_model_action(
+                    cloud_submenu,
+                    name,
+                    display,
+                    image=image,
+                )
+
+    def _refresh_chain_menu(self) -> None:
+        self._clear_chain_submenus()
 
         ollama_models: list[str] = []
         ollama_error: str | None = None
@@ -517,54 +635,55 @@ class MainWindow(QMainWindow):
         cloud_models = self._gemini.list_menu_models()
         all_models = [*ollama_models, *lmstudio_models, *cloud_models]
 
-        if not self._glm_ocr_text_model or self._glm_ocr_text_model not in all_models:
-            self._glm_ocr_text_model = self._default_glm_ocr_text_model(ollama_models)
-
-        if ollama_error:
-            self._add_glm_ocr_placeholder(
-                self._glm_ocr_ollama_submenu,
-                f"(unavailable: {ollama_error})",
+        if not self._chain_image_model or self._chain_image_model not in all_models:
+            self._chain_image_model = self._default_chain_image_model(ollama_models)
+        if not self._chain_text_model or self._chain_text_model not in all_models:
+            self._chain_text_model = self._default_chain_text_model(
+                ollama_models,
+                self._chain_image_model,
             )
-        elif not ollama_models:
-            self._add_glm_ocr_placeholder(self._glm_ocr_ollama_submenu, "(no models)")
-        else:
-            for name in ollama_models:
-                self._add_glm_ocr_model_action(self._glm_ocr_ollama_submenu, name, name)
 
-        if not lmstudio_models:
-            if self._lmstudio.models_dir.is_dir():
-                self._add_glm_ocr_placeholder(
-                    self._glm_ocr_lmstudio_submenu,
-                    "(no GGUF models found)",
-                )
-            else:
-                self._add_glm_ocr_placeholder(
-                    self._glm_ocr_lmstudio_submenu,
-                    f"(models folder not found: {self._lmstudio.models_dir})",
-                )
-        else:
-            for model_id in lmstudio_models:
-                label = lmstudio_labels.get(model_id, model_id)
-                self._add_glm_ocr_model_action(self._glm_ocr_lmstudio_submenu, model_id, label)
+        shared = {
+            "ollama_models": ollama_models,
+            "ollama_error": ollama_error,
+            "lmstudio_models": lmstudio_models,
+            "lmstudio_labels": lmstudio_labels,
+            "cloud_models": cloud_models,
+        }
+        self._populate_chain_model_submenus(
+            image=True,
+            ollama_submenu=self._chain_image_ollama_submenu,
+            lmstudio_submenu=self._chain_image_lmstudio_submenu,
+            cloud_submenu=self._chain_image_cloud_submenu,
+            **shared,
+        )
+        self._populate_chain_model_submenus(
+            image=False,
+            ollama_submenu=self._chain_text_ollama_submenu,
+            lmstudio_submenu=self._chain_text_lmstudio_submenu,
+            cloud_submenu=self._chain_text_cloud_submenu,
+            **shared,
+        )
 
-        if not cloud_models:
-            self._add_glm_ocr_placeholder(
-                self._glm_ocr_cloud_submenu,
-                "(set GEMINI_API_KEY in .env)",
-            )
-        else:
-            for name in cloud_models:
-                display = name.split(":", 1)[-1]
-                self._add_glm_ocr_model_action(self._glm_ocr_cloud_submenu, name, display)
-
-        for action in self._glm_ocr_model_actions:
+        for action in self._chain_image_model_actions:
             model_id = action.data()
             if model_id:
-                action.setChecked(model_id == self._glm_ocr_text_model)
+                action.setChecked(model_id == self._chain_image_model)
+        for action in self._chain_text_model_actions:
+            model_id = action.data()
+            if model_id:
+                action.setChecked(model_id == self._chain_text_model)
 
-    def _select_glm_ocr_text_model(self, model: str) -> None:
-        self._glm_ocr_text_model = model
-        for action in self._glm_ocr_model_actions:
+    def _select_chain_image_model(self, model: str) -> None:
+        self._chain_image_model = model
+        for action in self._chain_image_model_actions:
+            model_id = action.data()
+            if model_id:
+                action.setChecked(model_id == model)
+
+    def _select_chain_text_model(self, model: str) -> None:
+        self._chain_text_model = model
+        for action in self._chain_text_model_actions:
             model_id = action.data()
             if model_id:
                 action.setChecked(model_id == model)
@@ -662,7 +781,7 @@ class MainWindow(QMainWindow):
         self._worker.start()
         self._update_batch_actions(running=True)
 
-    def _start_glm_ocr_batch(self) -> None:
+    def _start_chain_batch(self) -> None:
         if not self._batch:
             QMessageBox.information(self, "No batch", "Import EXPORT.TXT first.")
             return
@@ -673,11 +792,18 @@ class MainWindow(QMainWindow):
                 "Use Fields → Define and save all field names before reading.",
             )
             return
-        if not self._glm_ocr_text_model:
+        if not self._chain_image_model:
+            QMessageBox.warning(
+                self,
+                "No image model",
+                "Select an image model under Chain before reading.",
+            )
+            return
+        if not self._chain_text_model:
             QMessageBox.warning(
                 self,
                 "No text model",
-                "Select a text model under GLM-OCR before reading.",
+                "Select a text model under Chain before reading.",
             )
             return
         if self._worker and self._worker.isRunning():
@@ -690,7 +816,8 @@ class MainWindow(QMainWindow):
         self._repopulate_table_values()
         self._worker = GlmOcrBatchWorker(
             self._batch,
-            chain_menu_id(self._glm_ocr_text_model),
+            self._chain_image_model,
+            self._chain_text_model,
             self._glm_ocr_chain,
             parent=self,
         )
@@ -776,7 +903,9 @@ class MainWindow(QMainWindow):
         self._read_batch_action.setEnabled(can_read)
         self._llm_read_action.setEnabled(can_read)
         self._ocr_read_action.setEnabled(can_read)
-        self._glm_ocr_read_action.setEnabled(can_read and bool(self._glm_ocr_text_model))
+        self._chain_read_action.setEnabled(
+            can_read and bool(self._chain_image_model) and bool(self._chain_text_model)
+        )
         pause_enabled = running and not paused and not self._batch_stopped
         resume_enabled = running and paused and not self._batch_stopped
         stop_enabled = running

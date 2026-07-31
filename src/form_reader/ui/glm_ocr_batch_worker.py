@@ -6,7 +6,7 @@ from PyQt6.QtCore import QMutex, QMutexLocker, QThread, pyqtSignal
 
 from ..models.batch import Batch
 from ..models.fields_config import FieldConfig
-from ..services.glm_ocr_chain import GlmOcrChain, strip_chain_prefix
+from ..services.glm_ocr_chain import GlmOcrChain
 from ..services.image_loader import image_to_png_bytes, load_first_page_image, placeholder_image
 from .batch_worker import BatchPosition
 
@@ -23,14 +23,16 @@ class GlmOcrBatchWorker(QThread):
     def __init__(
         self,
         batch: Batch,
-        chain_model: str,
+        image_model: str,
+        text_model: str,
         chain: GlmOcrChain,
         start_at: BatchPosition | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._batch = batch
-        self._text_model = strip_chain_prefix(chain_model)
+        self._image_model = image_model
+        self._text_model = text_model
         self._chain = chain
         self._mutex = QMutex()
         self._paused = False
@@ -142,7 +144,11 @@ class GlmOcrBatchWorker(QThread):
         path = row.resolve_path(self._batch.batch_dir)
         image = load_first_page_image(path) or placeholder_image()
         png = image_to_png_bytes(image)
-        ocr_text = self._chain.ocr_page(png, should_cancel=self._should_cancel)
+        ocr_text = self._chain.ocr_page(
+            self._image_model,
+            png,
+            should_cancel=self._should_cancel,
+        )
         self._ocr_cache[row_idx] = ocr_text
         return ocr_text
 
