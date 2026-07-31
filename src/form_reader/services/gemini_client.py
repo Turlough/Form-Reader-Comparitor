@@ -53,8 +53,16 @@ class GeminiClient:
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not set")
 
-        b64 = base64.b64encode(image_png).decode("ascii")
         url = f"{self._BASE}/models/{api_model}:generateContent"
+        logger.debug(
+            "Gemini extract_field model=%r prompt=%r image_bytes=%d url=%s",
+            api_model,
+            prompt,
+            len(image_png),
+            url,
+        )
+
+        b64 = base64.b64encode(image_png).decode("ascii")
         payload = {
             "contents": [
                 {
@@ -73,6 +81,11 @@ class GeminiClient:
 
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(url, params={"key": self.api_key}, json=payload)
+            logger.debug(
+                "Gemini response status=%s body=%s",
+                response.status_code,
+                response.text[:2000],
+            )
             if should_cancel and should_cancel():
                 raise InterruptedError("Cancelled")
             try:
@@ -82,21 +95,22 @@ class GeminiClient:
                 try:
                     err = exc.response.json().get("error", {})
                     detail = err.get("message", detail)
-                    logger.error(f"Gemini error:{err}: {detail}")
+                    logger.error("Gemini HTTP error: %s", err or detail)
                 except Exception:
-                    pass
+                    logger.error("Gemini HTTP error: %s", detail)
                 raise RuntimeError(detail or str(exc)) from exc
 
             data = response.json()
 
         if err := data.get("error"):
             msg = err.get("message", str(err))
-            logger.error(f"Gemini error: {msg}")
+            logger.error("Gemini error: %s", msg)
             raise RuntimeError(msg)
 
         text = _concat_response_text(data)
         if should_cancel and should_cancel():
             raise InterruptedError("Cancelled")
+        logger.debug("Gemini extract_field result=%r", text)
         return text
 
 
