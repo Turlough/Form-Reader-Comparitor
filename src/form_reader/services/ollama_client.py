@@ -25,6 +25,27 @@ class OllamaClient:
             self.timeout,
         )
 
+    @staticmethod
+    def _format_error(body: str) -> str:
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            return body.strip()
+        error = data.get("error", body)
+        if isinstance(error, dict):
+            return str(error.get("message") or error)
+        if isinstance(error, str):
+            try:
+                inner = json.loads(error)
+            except json.JSONDecodeError:
+                return error
+            if isinstance(inner, dict):
+                nested = inner.get("error", inner)
+                if isinstance(nested, dict):
+                    return str(nested.get("message") or nested)
+                return str(nested)
+        return body.strip()
+
     def list_models(self) -> list[str]:
         url = f"{self.host}/api/tags"
         logger.debug("Ollama list_models GET %s", url)
@@ -75,8 +96,13 @@ class OllamaClient:
                 try:
                     response.raise_for_status()
                 except httpx.HTTPStatusError as exc:
-                    logger.error("Ollama HTTP error: %s", exc.response.text[:2000])
-                    raise
+                    body = response.read().decode("utf-8", errors="replace")
+                    logger.error(
+                        "Ollama HTTP error status=%s body=%s",
+                        exc.response.status_code,
+                        body[:2000],
+                    )
+                    raise RuntimeError(self._format_error(body) or str(exc)) from exc
                 for line in response.iter_lines():
                     if should_cancel and should_cancel():
                         response.close()
