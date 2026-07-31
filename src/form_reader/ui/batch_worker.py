@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import QMutex, QMutexLocker, QThread, pyqtSignal
 
+logger = logging.getLogger(__name__)
+
 from ..models.batch import Batch
 from ..models.fields_config import FieldConfig
 from ..services.gemini_client import GeminiClient
 from ..services.image_loader import image_to_png_bytes, load_first_page_image, placeholder_image
+from ..services.lmstudio_client import LmStudioClient
 from ..services.ollama_client import OllamaClient
 
 
@@ -31,6 +35,7 @@ class BatchWorker(QThread):
         model: str,
         ollama: OllamaClient,
         gemini: GeminiClient | None = None,
+        lmstudio: LmStudioClient | None = None,
         start_at: BatchPosition | None = None,
         parent=None,
     ) -> None:
@@ -39,6 +44,7 @@ class BatchWorker(QThread):
         self._model = model
         self._ollama = ollama
         self._gemini = gemini
+        self._lmstudio = lmstudio
         self._mutex = QMutex()
         self._paused = False
         self._stopped = False
@@ -106,6 +112,12 @@ class BatchWorker(QThread):
                         return
                     continue
                 except Exception as exc:
+                    logger.exception(
+                        "Batch read failed row=%d column=%d model=%r",
+                        row_idx,
+                        column,
+                        self._model,
+                    )
                     self.cell_failed.emit(row_idx, column, str(exc))
                     continue
 
@@ -145,8 +157,17 @@ class BatchWorker(QThread):
         image = load_first_page_image(path) or placeholder_image()
         png = image_to_png_bytes(image)
         prompt = field.prompt.strip() or f"What is the value for {field.name}?"
+        logger.debug(
+            "BatchWorker _read_cell model=%r field=%r prompt=%r image_bytes=%d",
+            self._model,
+            field.name,
+            prompt,
+            len(png),
+        )
+
         api_model = GeminiClient.strip_menu_prefix(self._model)
         if api_model is not None:
+            logger.debug("Routing to Gemini api_model=%r", api_model)
             if not self._gemini or not self._gemini.is_configured:
                 raise RuntimeError("Gemini is not configured (set GEMINI_API_KEY).")
             return self._gemini.extract_field(
@@ -155,6 +176,20 @@ class BatchWorker(QThread):
                 png,
                 should_cancel=self._should_cancel,
             )
+
+        api_model = LmStudioClient.strip_menu_prefix(self._model)
+        if api_model is not None:
+            logger.debug("Routing to LM Studio api_model=%r", api_model)
+            if not self._lmstudio:
+                raise RuntimeError("LM Studio client is not configured.")
+            return self._lmstudio.extract_field(
+                api_model,
+                prompt,
+                png,
+                should_cancel=self._should_cancel,
+            )
+
+        logger.debug("Routing to Ollama model=%r", self._model)
         return self._ollama.extract_field(
             self._model,
             prompt,

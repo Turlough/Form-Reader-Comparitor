@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QMainWindow,
     QMessageBox,
+    QMenu,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -24,6 +25,7 @@ from ..models.batch import Batch
 from ..models.fields_config import FieldConfig, FieldsConfig, save_fields_config
 from ..services.export_parser import parse_export_txt
 from ..services.gemini_client import GeminiClient
+from ..services.lmstudio_client import LmStudioClient
 from ..services.ocr_service import DEFAULT_OCR_ENGINE, OCR_MENU_ENGINES, OcrService
 from ..services.ollama_client import DEFAULT_MODEL, OllamaClient
 from .batch_worker import BatchPosition, BatchWorker
@@ -47,6 +49,7 @@ class MainWindow(QMainWindow):
         self._settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         self._ollama = OllamaClient()
         self._gemini = GeminiClient()
+        self._lmstudio = LmStudioClient()
         self._ocr = OcrService()
         self._batch: Batch | None = None
         self._worker: BatchWorker | OcrBatchWorker | None = None
@@ -134,6 +137,10 @@ class MainWindow(QMainWindow):
         self._llm_read_action.triggered.connect(self._start_batch)
         self._llm_menu.addAction(self._llm_read_action)
         self._llm_menu.addSeparator()
+        self._ollama_submenu = self._llm_menu.addMenu("Ollama")
+        self._lmstudio_submenu = self._llm_menu.addMenu("LM Studio")
+        self._cloud_submenu = self._llm_menu.addMenu("Cloud")
+        self._runpod_submenu = self._llm_menu.addMenu("RunPod")
         self._model_actions: list[QAction] = []
 
         self._ocr_menu = bar.addMenu("&OCR")
@@ -328,10 +335,33 @@ class MainWindow(QMainWindow):
         self._apply_table_headers()
         self._apply_inactive_column_styles()
 
-    def _refresh_llm_menu(self) -> None:
-        for action in self._model_actions:
-            self._llm_menu.removeAction(action)
+    def _clear_llm_submenus(self) -> None:
+        for submenu in (
+            self._ollama_submenu,
+            self._lmstudio_submenu,
+            self._cloud_submenu,
+            self._runpod_submenu,
+        ):
+            submenu.clear()
         self._model_actions.clear()
+
+    def _add_model_action(self, submenu: QMenu, model_id: str, label: str) -> None:
+        action = QAction(label, self)
+        action.setData(model_id)
+        action.setCheckable(True)
+        action.setChecked(model_id == self._model)
+        action.triggered.connect(lambda checked, m=model_id: self._select_model(m))
+        submenu.addAction(action)
+        self._model_actions.append(action)
+
+    def _add_placeholder(self, submenu: QMenu, text: str) -> None:
+        action = QAction(text, self)
+        action.setEnabled(False)
+        submenu.addAction(action)
+        self._model_actions.append(action)
+
+    def _refresh_llm_menu(self) -> None:
+        self._clear_llm_submenus()
 
         ollama_models: list[str] = []
         ollama_error: str | None = None
@@ -340,56 +370,61 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             ollama_error = str(exc)
 
-        gemini_models = self._gemini.list_menu_models()
-        all_models = [*ollama_models, *gemini_models]
+        lmstudio_models = self._lmstudio.list_menu_models()
+        lmstudio_labels = self._lmstudio.menu_labels()
+        cloud_models = self._gemini.list_menu_models()
 
-        if not all_models:
-            if ollama_error:
-                msg = f"(no models: Ollama: {ollama_error}"
-                if not self._gemini.is_configured:
-                    msg += "; Gemini: set GEMINI_API_KEY in .env"
-                msg += ")"
-            else:
-                msg = "(no models: configure Ollama or GEMINI_API_KEY)"
-            placeholder = QAction(msg, self)
-            placeholder.setEnabled(False)
-            self._llm_menu.addAction(placeholder)
-            self._model_actions.append(placeholder)
-            return
+        all_models = [*ollama_models, *lmstudio_models, *cloud_models]
 
         if ollama_error:
-            warn = QAction(f"(Ollama unavailable: {ollama_error})", self)
-            warn.setEnabled(False)
-            self._llm_menu.addAction(warn)
-            self._model_actions.append(warn)
+            self._add_placeholder(
+                self._ollama_submenu,
+                f"(unavailable: {ollama_error})",
+            )
+        elif not ollama_models:
+            self._add_placeholder(self._ollama_submenu, "(no models)")
+        else:
+            for name in ollama_models:
+                self._add_model_action(self._ollama_submenu, name, name)
 
-        for name in ollama_models:
-            action = QAction(name, self)
-            action.setCheckable(True)
-            action.setChecked(name == self._model or name.startswith(self._model))
-            action.triggered.connect(lambda checked, m=name: self._select_model(m))
-            self._llm_menu.addAction(action)
-            self._model_actions.append(action)
+        if not lmstudio_models:
+            if self._lmstudio.models_dir.is_dir():
+                self._add_placeholder(self._lmstudio_submenu, "(no GGUF models found)")
+            else:
+                self._add_placeholder(
+                    self._lmstudio_submenu,
+                    f"(models folder not found: {self._lmstudio.models_dir})",
+                )
+        else:
+            for model_id in lmstudio_models:
+                label = lmstudio_labels.get(model_id, model_id)
+                self._add_model_action(self._lmstudio_submenu, model_id, label)
 
-        if gemini_models and ollama_models:
-            sep = self._llm_menu.addSeparator()
-            self._model_actions.append(sep)
+        if not cloud_models:
+            self._add_placeholder(
+                self._cloud_submenu,
+                "(set GEMINI_API_KEY in .env)",
+            )
+        else:
+            for name in cloud_models:
+                display = name.split(":", 1)[-1]
+                self._add_model_action(self._cloud_submenu, name, display)
 
-        for name in gemini_models:
-            action = QAction(name, self)
-            action.setCheckable(True)
-            action.setChecked(name == self._model)
-            action.triggered.connect(lambda checked, m=name: self._select_model(m))
-            self._llm_menu.addAction(action)
-            self._model_actions.append(action)
+        self._add_placeholder(self._runpod_submenu, "(not configured)")
 
         if self._model not in all_models and all_models:
             self._model = all_models[0]
+            for action in self._model_actions:
+                model_id = action.data()
+                if model_id:
+                    action.setChecked(model_id == self._model)
 
     def _select_model(self, model: str) -> None:
         self._model = model
         for action in self._model_actions:
-            action.setChecked(action.text() == model)
+            model_id = action.data()
+            if model_id:
+                action.setChecked(model_id == model)
 
     def _refresh_ocr_menu(self) -> None:
         for action in self._ocr_engine_actions:
@@ -493,6 +528,7 @@ class MainWindow(QMainWindow):
             self._model,
             self._ollama,
             gemini=self._gemini,
+            lmstudio=self._lmstudio,
             parent=self,
         )
         self._worker.cell_started.connect(self._on_cell_started)
