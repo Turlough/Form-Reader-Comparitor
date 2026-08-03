@@ -38,6 +38,12 @@ from .ocr_batch_worker import OcrBatchWorker
 
 SETTINGS_ORG = "Digidoocs"
 SETTINGS_APP = "FormReaderComparitor"
+SETTING_LAST_IMPORT_DIR = "last_import_dir"
+SETTING_LAST_EXPORT_PATH = "last_export_path"
+SETTING_LAST_LLM_MODEL = "last_llm_model"
+SETTING_LAST_OCR_ENGINE = "last_ocr_engine"
+SETTING_LAST_CHAIN_IMAGE_MODEL = "last_chain_image_model"
+SETTING_LAST_CHAIN_TEXT_MODEL = "last_chain_text_model"
 INACTIVE_COLUMN_COLOR = QColor(235, 235, 235)
 READING_HIGHLIGHT = QColor(255, 255, 200)
 MISMATCH_COLOR = QColor(180, 0, 0)
@@ -62,10 +68,12 @@ class MainWindow(QMainWindow):
         )
         self._batch: Batch | None = None
         self._worker: BatchWorker | OcrBatchWorker | GlmOcrBatchWorker | None = None
-        self._model = DEFAULT_MODEL
-        self._chain_image_model = ""
-        self._chain_text_model = ""
-        self._ocr_engine = DEFAULT_OCR_ENGINE
+        self._model = self._settings_str(SETTING_LAST_LLM_MODEL) or DEFAULT_MODEL
+        self._chain_image_model = self._settings_str(SETTING_LAST_CHAIN_IMAGE_MODEL)
+        self._chain_text_model = self._settings_str(SETTING_LAST_CHAIN_TEXT_MODEL)
+        self._ocr_engine = (
+            self._settings_str(SETTING_LAST_OCR_ENGINE) or DEFAULT_OCR_ENGINE
+        )
         self._fields_defined = False
         self._current_field_column = 1
         self._reading_cell: tuple[int, int] | None = None
@@ -112,6 +120,11 @@ class MainWindow(QMainWindow):
         self._update_batch_actions()
         self._refresh_llm_menu()
         self._refresh_ocr_menu()
+        self._reopen_last_export()
+
+    def _settings_str(self, key: str) -> str:
+        value = self._settings.value(key, "")
+        return str(value).strip() if value is not None else ""
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
@@ -181,26 +194,40 @@ class MainWindow(QMainWindow):
         self._table.currentCellChanged.connect(self._on_cell_changed)
 
     def _import_export(self) -> None:
-        last_dir = self._settings.value("last_import_dir", "")
+        last_dir = self._settings_str(SETTING_LAST_IMPORT_DIR)
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Import EXPORT.TXT",
-            str(last_dir),
+            last_dir,
             "Index files (EXPORT.TXT);;Text files (*.txt);;All files (*)",
         )
         if not path:
             return
+        self._open_export(Path(path), show_errors=True)
+
+    def _reopen_last_export(self) -> None:
+        path = self._settings_str(SETTING_LAST_EXPORT_PATH)
+        if not path:
+            return
         export_path = Path(path)
-        self._settings.setValue("last_import_dir", str(export_path.parent))
+        if not export_path.is_file():
+            return
+        self._open_export(export_path, show_errors=False)
+
+    def _open_export(self, export_path: Path, *, show_errors: bool) -> bool:
+        self._settings.setValue(SETTING_LAST_IMPORT_DIR, str(export_path.parent))
 
         try:
             batch = parse_export_txt(export_path)
         except Exception as exc:
-            QMessageBox.critical(self, "Import failed", str(exc))
-            return
+            if show_errors:
+                QMessageBox.critical(self, "Import failed", str(exc))
+            return False
 
+        self._settings.setValue(SETTING_LAST_EXPORT_PATH, str(export_path))
         self._load_batch(batch)
         self._batch_stopped = False
+        return True
 
     def _load_batch(self, batch: Batch) -> None:
         if self._worker and self._worker.isRunning():
@@ -463,6 +490,7 @@ class MainWindow(QMainWindow):
 
     def _select_model(self, model: str) -> None:
         self._model = model
+        self._settings.setValue(SETTING_LAST_LLM_MODEL, model)
         for action in self._model_actions:
             model_id = action.data()
             if model_id:
@@ -472,6 +500,10 @@ class MainWindow(QMainWindow):
         for action in self._ocr_engine_actions:
             self._ocr_menu.removeAction(action)
         self._ocr_engine_actions.clear()
+
+        known_engines = {engine_id for _, engine_id in OCR_MENU_ENGINES}
+        if self._ocr_engine not in known_engines:
+            self._ocr_engine = DEFAULT_OCR_ENGINE
 
         for label, engine_id in OCR_MENU_ENGINES:
             action = QAction(label, self)
@@ -485,6 +517,7 @@ class MainWindow(QMainWindow):
 
     def _select_ocr_engine(self, engine: str) -> None:
         self._ocr_engine = engine
+        self._settings.setValue(SETTING_LAST_OCR_ENGINE, engine)
         for action, (_, engine_id) in zip(self._ocr_engine_actions, OCR_MENU_ENGINES):
             action.setChecked(engine_id == engine)
 
@@ -693,6 +726,7 @@ class MainWindow(QMainWindow):
 
     def _select_chain_image_model(self, model: str) -> None:
         self._chain_image_model = model
+        self._settings.setValue(SETTING_LAST_CHAIN_IMAGE_MODEL, model)
         for action in self._chain_image_model_actions:
             model_id = action.data()
             if model_id:
@@ -700,6 +734,7 @@ class MainWindow(QMainWindow):
 
     def _select_chain_text_model(self, model: str) -> None:
         self._chain_text_model = model
+        self._settings.setValue(SETTING_LAST_CHAIN_TEXT_MODEL, model)
         for action in self._chain_text_model_actions:
             model_id = action.data()
             if model_id:
