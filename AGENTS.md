@@ -13,7 +13,7 @@ Terminology: `GLOSSARY.md` (batch, index, ground truth, EXPORT.TXT). Stage 1 UX 
 
 - Entry: repo-root `main.py` delegates to `form_reader.main:main`; CLI script `form-reader` from `pyproject.toml`
 - Package: `src/form_reader/` — `main.py`, `models/`, `services/`, `ui/`
-- Durable docs at repo root: `README.md`, `PLAN.md`, `STAGE_1.md`, `GLOSSARY.md`
+- Durable docs at repo root: `README.md`, `PLAN.md`, `STAGE_1.md`, `GLOSSARY.md`, `RUNPOD.md`
 - Dependencies: [uv](https://docs.astral.sh/uv/) (`pyproject.toml`, `uv.lock`); run `uv sync` after clone or dependency changes
 - Config: `.env` at repo root (template `env.example`); loaded from package dir or ancestors in `form_reader.main`
 
@@ -22,6 +22,7 @@ Terminology: `GLOSSARY.md` (batch, index, ground truth, EXPORT.TXT). Stage 1 UX 
 - `OLLAMA_HOST` — Ollama API base URL
 - `GEMINI_API_KEY` — Google Gemini text completions (menu prefix `gemini:`)
 - `LMSTUDIO_HOST` — LM Studio OpenAI-compatible API (menu prefix `lmstudio:`)
+- `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID`, `RUNPOD_MODEL` — RunPod serverless vLLM (menu prefix `runpod:`; all three required); operator notes in `RUNPOD.md`
 - `GLM_OCR_MODEL`, `GLM_OCR_PROMPT` — vision OCR model and prompt for glm-ocr chain
 - `TESSERACT_CMD` — optional path to tesseract binary (Windows auto-discovery otherwise)
 
@@ -29,7 +30,7 @@ Terminology: `GLOSSARY.md` (batch, index, ground truth, EXPORT.TXT). Stage 1 UX 
 
 1. **File → Import** — parse `EXPORT.TXT` (CSV, no headers; col 0 = relative image path; first page only for multipage TIFF/PDF)
 2. **Fields → Define** — field names, LLM prompts, active/inactive, per-field view settings; persisted as `fields.json` beside EXPORT.TXT
-3. **LLM** menu — choose Ollama model, Gemini, LM Studio, OCR engine, or glm-ocr chain (`glmocr:<text_model>`)
+3. **LLM** menu — choose Ollama model, Gemini, LM Studio, RunPod, OCR engine, or glm-ocr chain (`glmocr:<text_model>`)
 4. **Fields → Read Batch** — sequential read; table shows ground truth then read values; mismatches in red; inactive columns gray
 
 ### Conventions
@@ -118,5 +119,5 @@ When the user requests a durable behavior change, record it here or in the relev
 
 - `src/form_reader/AGENTS.md` — Python package: entrypoint, batch import, field config, orchestration
   - `src/form_reader/models/AGENTS.md` — batch rows, field config schema, `fields.json`
-  - `src/form_reader/services/AGENTS.md` — EXPORT parsing, image load, OCR and LLM clients, glm-ocr chain
+  - `src/form_reader/services/AGENTS.md` — EXPORT parsing, image load, OCR and LLM clients, glm-ocr chain, RunPod
   - `src/form_reader/ui/AGENTS.md` — PyQt6 main window, panels, dialogs, batch workers

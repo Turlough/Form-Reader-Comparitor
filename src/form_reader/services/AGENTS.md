@@ -18,6 +18,7 @@ Non-UI capabilities: EXPORT.TXT parsing, first-page image load/crop, classical O
 | `ollama_client.py` | Ollama chat/vision; `DEFAULT_MODEL`; list models for LLM menu |
 | `gemini_client.py` | Gemini text API; menu ids use `gemini:` prefix via `strip_menu_prefix` |
 | `lmstudio_client.py` | LM Studio OpenAI-compatible API; menu ids use `lmstudio:` prefix |
+| `runpod_client.py` | RunPod serverless vLLM OpenAI API; static `RUNPOD_*` env; menu ids use `runpod:` prefix |
 | `ocr_service.py` | PaddleOCR and Tesseract on normalized rectangles; `OCR_MENU_ENGINES` |
 | `glm_ocr_chain.py` | Two-step: Ollama vision OCR page once per row, then text model per field; menu id `glmocr:<text_model>` |
 

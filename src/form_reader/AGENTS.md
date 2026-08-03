@@ -14,9 +14,9 @@ Installable Python package for the Form Reader Comparator desktop app: import gr
 
 - `Batch` is the in-memory working set after import; no SQLite yet (Stage 2)
 - Field configuration round-trips through `fields.json` in the batch folder (`export_path.parent`)
-- `MainWindow` owns client instances (`OllamaClient`, `GeminiClient`, `LmStudioClient`, `OcrService`, `GlmOcrChain`) and selects the appropriate batch worker by menu model choice
+- `MainWindow` owns client instances (`OllamaClient`, `GeminiClient`, `LmStudioClient`, `RunPodClient`, `OcrService`, `GlmOcrChain`) and selects the appropriate batch worker by menu model choice
 - Batch reading is **sequential** (one thread per worker); workers emit Qt signals for cell progress — see `ui/AGENTS.md`
-- Menu model prefixes route to backends: `gemini:`, `lmstudio:`, `glmocr:` (chain), plain name → Ollama
+- Menu model prefixes route to backends: `gemini:`, `lmstudio:`, `runpod:`, `glmocr:` (chain), plain name → Ollama
 
 ## Work Guidance
 

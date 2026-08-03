@@ -16,7 +16,7 @@ PyQt6 desktop shell: three-panel layout (file list, ground-truth/read table, ima
 | `main_window.py` | Layout, menus, import, field define, batch run/stop/pause, model menu population, table/list sync |
 | `image_panel.py` | Image display, autofit/width/height, ground-truth label, selection rectangle → normalized coords |
 | `define_fields_dialog.py` | Fields → Define dialog; edits `FieldsConfig` |
-| `batch_worker.py` | Vision LLM per field (Ollama / Gemini / LM Studio); `BatchPosition` for resume |
+| `batch_worker.py` | Vision LLM per field (Ollama / Gemini / LM Studio / RunPod); `BatchPosition` for resume |
 | `ocr_batch_worker.py` | Classical OCR per field using rectangle crops |
 | `glm_ocr_batch_worker.py` | One OCR pass per row (cached), then text-model field extraction |
 
@@ -30,7 +30,10 @@ PyQt6 desktop shell: three-panel layout (file list, ground-truth/read table, ima
 - New reader mode: add worker (or branch existing), hook in `MainWindow` batch start and LLM menu
 - Long work off the UI thread; update table via signals/slots
 - Retain last folder on file dialogs via `QSettings`
+- `scratchpad/` holds ad-hoc probe scripts (not imported by the app)
 
 ## Verification
 
 ## Child DOX Index
+
+- `scratchpad/` — manual RunPod/API probes (`probe_runpod_text.py`, `probe_runpod_vision.py`)

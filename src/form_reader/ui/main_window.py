@@ -29,6 +29,7 @@ from ..services.glm_ocr_chain import GlmOcrChain
 from ..services.lmstudio_client import LmStudioClient
 from ..services.ocr_service import DEFAULT_OCR_ENGINE, OCR_MENU_ENGINES, OcrService
 from ..services.ollama_client import DEFAULT_MODEL, OllamaClient
+from ..services.runpod_client import RunPodClient
 from .batch_worker import BatchPosition, BatchWorker
 from .define_fields_dialog import DefineFieldsDialog
 from .glm_ocr_batch_worker import GlmOcrBatchWorker
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
         self._ollama = OllamaClient()
         self._gemini = GeminiClient()
         self._lmstudio = LmStudioClient()
+        self._runpod = RunPodClient()
         self._ocr = OcrService()
         self._glm_ocr_chain = GlmOcrChain(
             self._ollama,
@@ -396,8 +398,15 @@ class MainWindow(QMainWindow):
         lmstudio_models = self._lmstudio.list_menu_models()
         lmstudio_labels = self._lmstudio.menu_labels()
         cloud_models = self._gemini.list_menu_models()
+        runpod_models = self._runpod.list_menu_models()
+        runpod_labels = self._runpod.menu_labels()
 
-        all_models = [*ollama_models, *lmstudio_models, *cloud_models]
+        all_models = [
+            *ollama_models,
+            *lmstudio_models,
+            *cloud_models,
+            *runpod_models,
+        ]
 
         if ollama_error:
             self._add_placeholder(
@@ -433,7 +442,15 @@ class MainWindow(QMainWindow):
                 display = name.split(":", 1)[-1]
                 self._add_model_action(self._cloud_submenu, name, display)
 
-        self._add_placeholder(self._runpod_submenu, "(not configured)")
+        if not runpod_models:
+            self._add_placeholder(
+                self._runpod_submenu,
+                self._runpod.missing_config_hint() or "(not configured)",
+            )
+        else:
+            for model_id in runpod_models:
+                label = runpod_labels.get(model_id, model_id.split(":", 1)[-1])
+                self._add_model_action(self._runpod_submenu, model_id, label)
 
         self._refresh_chain_menu()
 
@@ -771,6 +788,7 @@ class MainWindow(QMainWindow):
             self._ollama,
             gemini=self._gemini,
             lmstudio=self._lmstudio,
+            runpod=self._runpod,
             parent=self,
         )
         self._worker.cell_started.connect(self._on_cell_started)

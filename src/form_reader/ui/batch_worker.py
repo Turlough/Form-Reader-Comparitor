@@ -14,6 +14,7 @@ from ..services.gemini_client import GeminiClient
 from ..services.image_loader import image_to_png_bytes, load_first_page_image, placeholder_image
 from ..services.lmstudio_client import LmStudioClient
 from ..services.ollama_client import OllamaClient
+from ..services.runpod_client import RunPodClient
 
 
 @dataclass
@@ -36,6 +37,7 @@ class BatchWorker(QThread):
         ollama: OllamaClient,
         gemini: GeminiClient | None = None,
         lmstudio: LmStudioClient | None = None,
+        runpod: RunPodClient | None = None,
         start_at: BatchPosition | None = None,
         parent=None,
     ) -> None:
@@ -45,6 +47,7 @@ class BatchWorker(QThread):
         self._ollama = ollama
         self._gemini = gemini
         self._lmstudio = lmstudio
+        self._runpod = runpod
         self._mutex = QMutex()
         self._paused = False
         self._stopped = False
@@ -183,6 +186,21 @@ class BatchWorker(QThread):
             if not self._lmstudio:
                 raise RuntimeError("LM Studio client is not configured.")
             return self._lmstudio.extract_field(
+                api_model,
+                prompt,
+                png,
+                should_cancel=self._should_cancel,
+            )
+
+        api_model = RunPodClient.strip_menu_prefix(self._model)
+        if api_model is not None:
+            logger.debug("Routing to RunPod api_model=%r", api_model)
+            if not self._runpod or not self._runpod.is_configured:
+                raise RuntimeError(
+                    "RunPod is not configured "
+                    "(set RUNPOD_API_KEY, RUNPOD_ENDPOINT_ID, and RUNPOD_MODEL)."
+                )
+            return self._runpod.extract_field(
                 api_model,
                 prompt,
                 png,
