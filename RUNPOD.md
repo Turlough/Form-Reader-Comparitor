@@ -23,7 +23,7 @@ Do **not** put worker knobs (`MAX_MODEL_LEN`, `LIMIT_MM_PER_PROMPT`, …) in the
 vLLM may serve a lowercased id. After the endpoint is up:
 
 ```bash
-curl -sS "https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/openai/v1/models" \
+curl -sS "https:/Qwen/api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/openai/v1/models" \
   -H "Authorization: Bearer ${RUNPOD_API_KEY}"
 ```
 
