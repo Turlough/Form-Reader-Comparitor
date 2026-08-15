@@ -53,7 +53,7 @@ In this stage:
 ## Process the imported file
 The user selects menu item **Run → Read Batch** (or **LLM / OCR / Chain → Read**).
 The application runs the selected reader.
-**Concurrency** sets how many field reads run at once: 1, 2, 4, 8, or 16. The last choice is restored on launch. Default is 1 (sequential).
+**Concurrency** sets how many field reads run at once: 1, 2, 4, 8, 16, 32, or 64. The last choice is restored on launch. Default is 1 (sequential).
 1. For each active field in a row, the appropriate prompt is from **fields.json** is read and applied.
 2. The result is immediately written to the corresponding cell in the table. Cells currently being read are highlighted.
 3. If the read value of any cell is not the same as the ground-truth value, its font is red.

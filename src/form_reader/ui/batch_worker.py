@@ -23,7 +23,7 @@ from ..services.runpod_client import RunPodClient
 
 logger = logging.getLogger(__name__)
 
-CONCURRENCY_OPTIONS = (1, 2, 4, 8, 16)
+CONCURRENCY_OPTIONS = (1, 2, 4, 8, 16, 32, 64)
 DEFAULT_CONCURRENCY = 1
 
 

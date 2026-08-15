@@ -23,7 +23,7 @@ PyQt6 desktop shell: three-panel layout (file list, ground-truth/read table, ima
 | `stats_window.py` | Stats → View Stats; sortable table with per-column filter combos |
 
 - Workers inherit `BaseBatchWorker` (`QThread`); common signals: `cell_started`, `cell_completed`, `cell_failed`, `batch_finished`, `batch_stopped`
-- **Concurrency** menu: exclusive choices 1, 2, 4, 8, 16 concurrent field reads (default 1); applies to LLM, OCR, and Chain batch runs; disabled while a run is in progress
+- **Concurrency** menu: exclusive choices 1, 2, 4, 8, 16, 32, 64 concurrent field reads (default 1); applies to LLM, OCR, and Chain batch runs; disabled while a run is in progress
 - Finished and stopped runs are recorded (workers, method/models, cells read, case-insensitive accurate count, duration excluding pause); failed cells are not counted as read
 - `QSettings` org `Digidoocs`, app `FormReaderComparitor` — keys: `last_import_dir`, `last_export_path`, `last_llm_model`, `last_ocr_engine`, `last_chain_image_model`, `last_chain_text_model`, `last_concurrency`
 - On startup: reopen `last_export_path` if the file still exists (silent skip on missing/unreadable); restore LLM / OCR / Chain / Concurrency menu selections when still available

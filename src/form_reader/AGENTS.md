@@ -15,7 +15,7 @@ Installable Python package for the Form Reader Comparator desktop app: import gr
 - `Batch` is the in-memory working set after import; run-level stats persist in SQLite (`db/`) — not the full Stage 2 schema
 - Field configuration round-trips through `fields.json` in the batch folder (`export_path.parent`)
 - `MainWindow` owns client instances (`OllamaClient`, `GeminiClient`, `LmStudioClient`, `RunPodClient`, `OcrService`, `GlmOcrChain`) and selects the appropriate batch worker by menu model choice
-- Batch reading uses one QThread worker plus a thread pool sized by the **Concurrency** menu (1, 2, 4, 8, 16); workers emit Qt signals for cell progress — see `ui/AGENTS.md`
+- Batch reading uses one QThread worker plus a thread pool sized by the **Concurrency** menu (1, 2, 4, 8, 16, 32, 64); workers emit Qt signals for cell progress — see `ui/AGENTS.md`
 - Menu model prefixes route to backends: `gemini:`, `lmstudio:`, `runpod:`, `glmocr:` (chain), plain name → Ollama
 - Each finished or stopped batch run is recorded via `RunStatsRepository` (workers, method/models, cells read/accurate, duration excluding pause)
 
