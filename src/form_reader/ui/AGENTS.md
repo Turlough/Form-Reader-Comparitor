@@ -37,4 +37,4 @@ PyQt6 desktop shell: three-panel layout (file list, ground-truth/read table, ima
 
 ## Child DOX Index
 
-- `scratchpad/` — manual RunPod/API probes (`probe_runpod_text.py`, `probe_runpod_vision.py`)
+- `scratchpad/` — manual RunPod/API probes (`probe_runpod_text.py`, `probe_runpod_vision.py`); they load `.env` and use `RunPodClient`

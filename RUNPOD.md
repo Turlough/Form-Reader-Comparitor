@@ -1,39 +1,53 @@
-# RunPod (Qwen3-VL serverless)
+# RunPod (Qwen3-VL)
 
-Operator notes for **LLM → RunPod** against a RunPod Serverless **vLLM** endpoint. App client: `src/form_reader/services/runpod_client.py`. Menu id: `runpod:<RUNPOD_MODEL>`.
+Operator notes for **LLM → RunPod**. App client: `src/form_reader/services/runpod_client.py`. Menu id: `runpod:<RUNPOD_MODEL>`.
+
+Two backends share the same menu prefix. **`RUNPOD_HOST` (GPU pod) wins** if both are set.
 
 ## Desktop `.env` (app)
 
-All three required; restart the app after changes (`.env` loads at startup only).
+Restart the app after changes (`.env` loads at startup only). `RUNPOD_MODEL` must match the `id` from `GET {base}/models`.
 
 | Variable | Purpose |
 |----------|---------|
-| `RUNPOD_API_KEY` | RunPod API key (`Authorization: Bearer …`) |
-| `RUNPOD_ENDPOINT_ID` | Serverless endpoint id (URL segment only — not the display name) |
-| `RUNPOD_MODEL` | **Exact** model id returned by `/openai/v1/models` |
+| `RUNPOD_HOST` | GPU pod OpenAI proxy, e.g. `https://{POD_ID}-8000.proxy.runpod.net` (`/v1` appended if missing) |
+| `RUNPOD_ENDPOINT_ID` | Serverless endpoint id only — **not** a pod id |
+| `RUNPOD_MODEL` | Exact served model id (`--served-model-name` or `/v1/models` `id`) |
+| `RUNPOD_API_KEY` | Required for serverless; optional for a pod unless vLLM was started with `--api-key` |
 
-Base URL used by the app:
+Do **not** put worker knobs (`MAX_MODEL_LEN`, `LIMIT_MM_PER_PROMPT`, …) in the desktop `.env`.
 
-`https://api.runpod.ai/v2/{RUNPOD_ENDPOINT_ID}/openai/v1`
+### GPU pod (preferred)
 
-Do **not** put worker knobs (`MAX_MODEL_LEN`, `LIMIT_MM_PER_PROMPT`, …) in the desktop `.env` — they only apply on the RunPod endpoint.
+Image `vllm/vllm-openai`, expose HTTP **8000**, bind `--host 0.0.0.0 --port 8000`. Example:
 
-### Model id must match the worker
+```
+vllm serve Qwen/Qwen3-VL-8B-Instruct \
+  --host 0.0.0.0 --port 8000 \
+  --served-model-name qwen3-vl-8b-instruct \
+  --gpu-memory-utilization 0.90 \
+  --max-model-len 32768
+```
 
-vLLM may serve a lowercased id. After the endpoint is up:
+App base URL: `https://{POD_ID}-8000.proxy.runpod.net/v1`
 
 ```bash
-curl -sS "https:/Qwen/api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/openai/v1/models" \
+curl -sS "https://${POD_ID}-8000.proxy.runpod.net/v1/models"
+curl -sS "https://${POD_ID}-8000.proxy.runpod.net/health"
+```
+
+The HTTP proxy is public (no RunPod API key) and Cloudflare-capped at **100s** (524 if slower). Use TCP from the Connect menu if form pages exceed that.
+
+### Serverless (optional)
+
+Base URL: `https://api.runpod.ai/v2/{RUNPOD_ENDPOINT_ID}/openai/v1`
+
+```bash
+curl -sS "https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/openai/v1/models" \
   -H "Authorization: Bearer ${RUNPOD_API_KEY}"
 ```
 
-Set `RUNPOD_MODEL` to the `id` field (e.g. `qwen/qwen3-vl-8b-instruct`), not necessarily the Hugging Face casing (`Qwen/Qwen3-VL-8B-Instruct`). A mismatch often surfaces as a generic OpenAI-path **500**.
-
-## RunPod console (worker)
-
-Deploy Hub/image: **vLLM worker** (`runpod-workers/worker-vllm` / `runpod/worker-v1-vllm:…`) on a **24GB+** GPU (RTX 4090 / A5000 class). Prefer a **network volume** so cold starts do not re-download weights.
-
-Recommended worker env for **Qwen3-VL-8B-Instruct** + form pages:
+Hub/image: **vLLM worker** on a **24GB+** GPU. Prefer a **network volume**. Suggested worker env:
 
 ```
 MODEL_NAME=Qwen/Qwen3-VL-8B-Instruct
@@ -46,61 +60,36 @@ MAX_NUM_SEQS=1
 MAX_CONCURRENCY=1
 ```
 
-Notes:
-
-- `LIMIT_MM_PER_PROMPT=image=1` is required for vision; without it, image requests often fail.
-- `MAX_MODEL_LEN` is a trade-off: form-page images consume many vision tokens. **1024** is usually too low for full pages (tiny test images may still work). **4096** is a practical starting point for this app; raise toward **8192** only if KV cache still allocates.
-- App batch reading is sequential — keep concurrency at **1** initially.
-
-After deploy: copy endpoint id → `RUNPOD_ENDPOINT_ID`; set `RUNPOD_MODEL` from `/openai/v1/models` as above.
+`LIMIT_MM_PER_PROMPT=image=1` is required for vision on the serverless worker. App batch reading is sequential — keep concurrency at **1** initially.
 
 ## VRAM / “No available memory for the cache blocks”
 
-That log means weights left **no room for the KV cache**. Requests hang or fail.
-
-Mitigations (worker side):
-
-1. Lower `MAX_MODEL_LEN` (e.g. 4096 → 2048) **or**
-2. Lower `MAX_NUM_SEQS` / `MAX_CONCURRENCY` to `1` **or**
-3. Quantize / use an FP8 checkpoint **or**
-4. Move to a larger GPU (48GB)
-
-FP16 Qwen3-VL-8B on 24GB is tight once vision + KV are included.
+Weights left **no room for the KV cache**. Lower `MAX_MODEL_LEN`, set `MAX_NUM_SEQS` / `MAX_CONCURRENCY` to `1`, quantize, or use a larger GPU. FP16 Qwen3-VL-8B on 24GB is tight once vision + KV are included.
 
 ## Probes (scratchpad)
 
-From repo root (loads `.env`):
+From repo root (loads `.env`, uses `RunPodClient`):
 
 ```bash
-# Text only — proves endpoint + model id
 uv run python src/form_reader/ui/scratchpad/probe_runpod_text.py
-
-# Vision — 1x1 PNG (sanity); then form-sized page
 uv run python src/form_reader/ui/scratchpad/probe_runpod_vision.py
 uv run python src/form_reader/ui/scratchpad/probe_runpod_vision.py --large
 uv run python src/form_reader/ui/scratchpad/probe_runpod_vision.py --image /path/to/page.png
 ```
 
-Also useful:
-
-```bash
-# Workers / job counters
-curl -sS "https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/health" \
-  -H "Authorization: Bearer ${RUNPOD_API_KEY}"
-```
-
-Cold start + first load can take minutes. Prefer waiting until `/health` shows `ready` workers before judging failures.
+Cold start + first load can take minutes. Wait for `/health` (pod) or ready workers (serverless) before judging failures.
 
 ## Failure cheatsheet
 
 | Symptom | Likely cause |
 |---------|----------------|
-| `endpoint not found` | Placeholder or wrong `RUNPOD_ENDPOINT_ID`; app not restarted after `.env` edit |
-| OpenAI **500**, text probe fails, `/models` works | `RUNPOD_MODEL` ≠ served `id` (check casing) |
+| App posts to `api.runpod.ai/v2/…/openai/v1` | Pod id in `RUNPOD_ENDPOINT_ID`; set `RUNPOD_HOST` instead |
+| Cloudflare **1010** | Python User-Agent blocked on the pod proxy (client sends a browser-like UA) |
+| Proxy **524** / 100s timeout | Form page too slow for HTTP proxy; use TCP or a smaller image |
+| OpenAI **500**, `/models` works | `RUNPOD_MODEL` ≠ served `id` (check `--served-model-name`) |
 | Text OK, tiny vision OK, app / `--large` **500** | `MAX_MODEL_LEN` too small for page image tokens |
-| Hang + log “No available memory for the cache blocks” | Model + context exceed GPU; lower `MAX_MODEL_LEN` or free VRAM |
-| Vision ignored / vision **500** | Missing `LIMIT_MM_PER_PROMPT=image=1` on **worker** |
-| Generic OpenAI **500** with little detail | Check RunPod worker logs; try native `/runsync` or the probes above |
+| Hang + log “No available memory for the cache blocks” | Model + context exceed GPU |
+| Vision ignored / vision **500** (serverless) | Missing `LIMIT_MM_PER_PROMPT=image=1` on **worker** |
 
 ## App behaviour (Stage 1)
 

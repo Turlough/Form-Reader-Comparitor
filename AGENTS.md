@@ -22,7 +22,7 @@ Terminology: `GLOSSARY.md` (batch, index, ground truth, EXPORT.TXT). Stage 1 UX 
 - `OLLAMA_HOST` — Ollama API base URL
 - `GEMINI_API_KEY` — Google Gemini text completions (menu prefix `gemini:`)
 - `LMSTUDIO_HOST` — LM Studio OpenAI-compatible API (menu prefix `lmstudio:`)
-- `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID`, `RUNPOD_MODEL` — RunPod serverless vLLM (menu prefix `runpod:`; all three required); operator notes in `RUNPOD.md`
+- `RUNPOD_HOST`, `RUNPOD_MODEL` — RunPod GPU pod OpenAI proxy (menu prefix `runpod:`); optional `RUNPOD_ENDPOINT_ID` + `RUNPOD_API_KEY` for serverless; operator notes in `RUNPOD.md`
 - `GLM_OCR_MODEL`, `GLM_OCR_PROMPT` — vision OCR model and prompt for glm-ocr chain
 - `TESSERACT_CMD` — optional path to tesseract binary (Windows auto-discovery otherwise)
 

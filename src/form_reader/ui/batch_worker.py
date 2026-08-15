@@ -196,9 +196,11 @@ class BatchWorker(QThread):
         if api_model is not None:
             logger.debug("Routing to RunPod api_model=%r", api_model)
             if not self._runpod or not self._runpod.is_configured:
+                hint = (
+                    self._runpod.missing_config_hint() if self._runpod else ""
+                )
                 raise RuntimeError(
-                    "RunPod is not configured "
-                    "(set RUNPOD_API_KEY, RUNPOD_ENDPOINT_ID, and RUNPOD_MODEL)."
+                    "RunPod is not configured" + (f" {hint}" if hint else ".")
                 )
             return self._runpod.extract_field(
                 api_model,

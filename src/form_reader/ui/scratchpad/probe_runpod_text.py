@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
+
+from form_reader.services.runpod_client import RunPodClient
 
 
 def _load_dotenv() -> Path | None:
@@ -25,45 +26,27 @@ def _load_dotenv() -> Path | None:
 
 def main() -> int:
     env_path = _load_dotenv()
-    api_key = os.environ.get("RUNPOD_API_KEY", "").strip()
-    endpoint_id = os.environ.get("RUNPOD_ENDPOINT_ID", "").strip()
-    model = os.environ.get("RUNPOD_MODEL", "").strip()
+    client = RunPodClient()
 
     if env_path:
         print(f"Loaded .env from {env_path}", file=sys.stderr)
     else:
         print("No .env found; using process environment", file=sys.stderr)
 
-    missing = [
-        name
-        for name, value in (
-            ("RUNPOD_API_KEY", api_key),
-            ("RUNPOD_ENDPOINT_ID", endpoint_id),
-            ("RUNPOD_MODEL", model),
-        )
-        if not value
-    ]
-    if missing:
-        print(f"Missing: {', '.join(missing)}", file=sys.stderr)
+    if not client.is_configured:
+        print(f"Missing: {client.missing_config_hint()}", file=sys.stderr)
         return 1
 
-    url = f"https://api.runpod.ai/v2/{endpoint_id}/openai/v1/chat/completions"
+    url = f"{client.base_url}/chat/completions"
     payload = {
-        "model": model,
+        "model": client.model,
         "messages": [{"role": "user", "content": "Say hi"}],
     }
     print(f"POST {url}", file=sys.stderr)
-    print(f"model={model!r}", file=sys.stderr)
+    print(f"model={client.model!r}", file=sys.stderr)
 
-    with httpx.Client(timeout=600.0) as client:
-        response = client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
+    with httpx.Client(timeout=600.0) as http:
+        response = http.post(url, headers=client.request_headers, json=payload)
 
     print(f"status={response.status_code}", file=sys.stderr)
     try:
