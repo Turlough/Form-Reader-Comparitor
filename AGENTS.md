@@ -28,10 +28,10 @@ Terminology: `GLOSSARY.md` (batch, index, ground truth, EXPORT.TXT). Stage 1 UX 
 
 ### Batch workflow (Stage 1)
 
-1. **File → Import** — parse `EXPORT.TXT` (CSV, no headers; col 0 = relative image path; first page only for multipage TIFF/PDF); last path and LLM/OCR/Chain selections restore on next launch via `QSettings`
+1. **File → Import** — parse `EXPORT.TXT` (CSV, no headers; col 0 = relative image path; first page only for multipage TIFF/PDF); last path, LLM/OCR/Chain selections, and Concurrency restore on next launch via `QSettings`
 2. **Fields → Define** — field names, LLM prompts, active/inactive, per-field view settings; persisted as `fields.json` beside EXPORT.TXT
 3. **LLM** menu — choose Ollama model, Gemini, LM Studio, RunPod, OCR engine, or glm-ocr chain (`glmocr:<text_model>`)
-4. **Fields → Read Batch** — sequential read; table shows ground truth then read values; mismatches in red; inactive columns gray
+4. **Run → Read Batch** (or LLM/OCR/Chain → Read) — field reads run with **Concurrency** (1, 2, 4, 8, or 16); table shows ground truth then read values; mismatches in red; inactive columns gray
 
 ### Conventions
 

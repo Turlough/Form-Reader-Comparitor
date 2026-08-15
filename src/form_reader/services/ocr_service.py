@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -46,6 +47,7 @@ def _resolve_tesseract_cmd() -> str:
 class OcrService:
     def __init__(self) -> None:
         self._paddle: PaddleOCR | None = None
+        self._paddle_lock = threading.Lock()
 
     def read_region(
         self,
@@ -59,25 +61,6 @@ class OcrService:
         if engine == OCR_ENGINE_TESSERACT:
             return self._read_tesseract(crop)
         raise ValueError(f"Unknown OCR engine: {engine}")
-
-    def _get_paddle(self) -> PaddleOCR:
-        if self._paddle is None:
-            try:
-                from paddleocr import PaddleOCR
-            except ImportError as exc:
-                raise RuntimeError(
-                    "PaddleOCR is not installed. Install with: pip install paddleocr paddlepaddle"
-                ) from exc
-            # PaddleOCR 3.x: show_log/use_angle_cls removed; enable_mkldnn=False avoids
-            # a Paddle 3.3+ CPU oneDNN bug on Windows.
-            self._paddle = PaddleOCR(
-                lang="en",
-                use_textline_orientation=True,
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-                enable_mkldnn=False,
-            )
-        return self._paddle
 
     def _read_tesseract(self, image: Image.Image) -> str:
         try:
@@ -100,10 +83,30 @@ class OcrService:
     def _read_paddle(self, image: Image.Image) -> str:
         import numpy as np
 
-        ocr = self._get_paddle()
         arr = np.array(image.convert("RGB"))
-        result = ocr.ocr(arr)
+        with self._paddle_lock:
+            ocr = self._ensure_paddle_locked()
+            result = ocr.ocr(arr)
         return _paddle_result_to_text(result)
+
+    def _ensure_paddle_locked(self) -> PaddleOCR:
+        if self._paddle is None:
+            try:
+                from paddleocr import PaddleOCR
+            except ImportError as exc:
+                raise RuntimeError(
+                    "PaddleOCR is not installed. Install with: pip install paddleocr paddlepaddle"
+                ) from exc
+            # PaddleOCR 3.x: show_log/use_angle_cls removed; enable_mkldnn=False avoids
+            # a Paddle 3.3+ CPU oneDNN bug on Windows.
+            self._paddle = PaddleOCR(
+                lang="en",
+                use_textline_orientation=True,
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                enable_mkldnn=False,
+            )
+        return self._paddle
 
 
 def _paddle_result_to_text(result) -> str:

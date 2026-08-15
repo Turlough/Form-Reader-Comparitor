@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import QSettings, Qt
-from PyQt6.QtGui import QAction, QColor, QBrush, QFont
+from PyQt6.QtGui import QAction, QActionGroup, QColor, QBrush, QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -30,7 +30,12 @@ from ..services.lmstudio_client import LmStudioClient
 from ..services.ocr_service import DEFAULT_OCR_ENGINE, OCR_MENU_ENGINES, OcrService
 from ..services.ollama_client import DEFAULT_MODEL, OllamaClient
 from ..services.runpod_client import RunPodClient
-from .batch_worker import BatchPosition, BatchWorker
+from .batch_worker import (
+    CONCURRENCY_OPTIONS,
+    DEFAULT_CONCURRENCY,
+    BaseBatchWorker,
+    BatchWorker,
+)
 from .define_fields_dialog import DefineFieldsDialog
 from .glm_ocr_batch_worker import GlmOcrBatchWorker
 from .image_panel import ImagePanel
@@ -44,6 +49,7 @@ SETTING_LAST_LLM_MODEL = "last_llm_model"
 SETTING_LAST_OCR_ENGINE = "last_ocr_engine"
 SETTING_LAST_CHAIN_IMAGE_MODEL = "last_chain_image_model"
 SETTING_LAST_CHAIN_TEXT_MODEL = "last_chain_text_model"
+SETTING_LAST_CONCURRENCY = "last_concurrency"
 INACTIVE_COLUMN_COLOR = QColor(235, 235, 235)
 READING_HIGHLIGHT = QColor(255, 255, 200)
 MISMATCH_COLOR = QColor(180, 0, 0)
@@ -67,16 +73,17 @@ class MainWindow(QMainWindow):
             lmstudio=self._lmstudio,
         )
         self._batch: Batch | None = None
-        self._worker: BatchWorker | OcrBatchWorker | GlmOcrBatchWorker | None = None
+        self._worker: BaseBatchWorker | None = None
         self._model = self._settings_str(SETTING_LAST_LLM_MODEL) or DEFAULT_MODEL
         self._chain_image_model = self._settings_str(SETTING_LAST_CHAIN_IMAGE_MODEL)
         self._chain_text_model = self._settings_str(SETTING_LAST_CHAIN_TEXT_MODEL)
         self._ocr_engine = (
             self._settings_str(SETTING_LAST_OCR_ENGINE) or DEFAULT_OCR_ENGINE
         )
+        self._concurrency = self._settings_concurrency()
         self._fields_defined = False
         self._current_field_column = 1
-        self._reading_cell: tuple[int, int] | None = None
+        self._reading_cells: set[tuple[int, int]] = set()
         self._batch_stopped = False
 
         self._file_list = QListWidget()
@@ -126,6 +133,16 @@ class MainWindow(QMainWindow):
         value = self._settings.value(key, "")
         return str(value).strip() if value is not None else ""
 
+    def _settings_concurrency(self) -> int:
+        value = self._settings.value(SETTING_LAST_CONCURRENCY, DEFAULT_CONCURRENCY)
+        try:
+            concurrency = int(value)
+        except (TypeError, ValueError):
+            return DEFAULT_CONCURRENCY
+        if concurrency in CONCURRENCY_OPTIONS:
+            return concurrency
+        return DEFAULT_CONCURRENCY
+
     def _build_menus(self) -> None:
         bar = self.menuBar()
 
@@ -152,6 +169,22 @@ class MainWindow(QMainWindow):
         field_menu.addAction(self._pause_action)
         field_menu.addAction(self._resume_action)
         field_menu.addAction(self._stop_action)
+
+        concurrency_menu = bar.addMenu("&Concurrency")
+        self._concurrency_group = QActionGroup(self)
+        self._concurrency_group.setExclusive(True)
+        self._concurrency_actions: list[QAction] = []
+        for count in CONCURRENCY_OPTIONS:
+            action = QAction(str(count), self)
+            action.setCheckable(True)
+            action.setData(count)
+            action.setChecked(count == self._concurrency)
+            action.triggered.connect(
+                lambda checked, n=count: self._select_concurrency(n, checked)
+            )
+            self._concurrency_group.addAction(action)
+            concurrency_menu.addAction(action)
+            self._concurrency_actions.append(action)
 
         self._llm_menu = bar.addMenu("&LLM")
         self._refresh_models_action = QAction("&Refresh models", self)
@@ -237,7 +270,7 @@ class MainWindow(QMainWindow):
         self._batch = batch
         self._fields_defined = batch.fields_config.is_defined
         self._batch_stopped = False
-        self._reading_cell = None
+        self._reading_cells.clear()
         self._current_field_column = 1
         self._image_panel.set_batch_dir(batch.batch_dir)
 
@@ -495,6 +528,14 @@ class MainWindow(QMainWindow):
             model_id = action.data()
             if model_id:
                 action.setChecked(model_id == model)
+
+    def _select_concurrency(self, count: int, checked: bool = True) -> None:
+        if not checked:
+            return
+        self._concurrency = count
+        self._settings.setValue(SETTING_LAST_CONCURRENCY, count)
+        for action in self._concurrency_actions:
+            action.setChecked(action.data() == count)
 
     def _refresh_ocr_menu(self) -> None:
         for action in self._ocr_engine_actions:
@@ -788,6 +829,7 @@ class MainWindow(QMainWindow):
             self._batch,
             self._ocr_engine,
             self._ocr,
+            concurrency=self._concurrency,
             parent=self,
         )
         self._worker.cell_started.connect(self._on_cell_started)
@@ -824,6 +866,7 @@ class MainWindow(QMainWindow):
             gemini=self._gemini,
             lmstudio=self._lmstudio,
             runpod=self._runpod,
+            concurrency=self._concurrency,
             parent=self,
         )
         self._worker.cell_started.connect(self._on_cell_started)
@@ -872,6 +915,7 @@ class MainWindow(QMainWindow):
             self._chain_image_model,
             self._chain_text_model,
             self._glm_ocr_chain,
+            concurrency=self._concurrency,
             parent=self,
         )
         self._worker.cell_started.connect(self._on_cell_started)
@@ -899,40 +943,52 @@ class MainWindow(QMainWindow):
             self._update_batch_actions()
 
     def _on_cell_started(self, row: int, column: int) -> None:
-        self._reading_cell = (row, column)
+        self._reading_cells.add((row, column))
         col_idx = column - 1
         item = self._table.item(row, col_idx)
         if item:
             item.setBackground(QBrush(READING_HIGHLIGHT))
-        self._file_list.setCurrentRow(row)
-        self._table.setCurrentCell(row, col_idx)
-        self._show_row_column(row, column)
+        if self._concurrency == 1:
+            self._file_list.setCurrentRow(row)
+            self._table.setCurrentCell(row, col_idx)
+            self._show_row_column(row, column)
 
     def _on_cell_completed(self, row: int, column: int, value: str) -> None:
         assert self._batch
+        self._reading_cells.discard((row, column))
         col_idx = column - 1
         item = self._table.item(row, col_idx)
         if item:
             item.setText(value)
             self._style_cell_item(item, row, column)
-        self._reading_cell = None
 
     def _on_cell_failed(self, row: int, column: int, message: str) -> None:
+        self._reading_cells.discard((row, column))
         col_idx = column - 1
         item = self._table.item(row, col_idx)
         if item:
             item.setText(f"[error: {message}]")
             item.setForeground(QBrush(MISMATCH_COLOR))
-        self._reading_cell = None
+            item.setBackground(QBrush())
 
     def _on_batch_finished(self) -> None:
-        self._reading_cell = None
+        self._clear_reading_highlights()
         self._update_batch_actions()
 
     def _on_batch_stopped(self) -> None:
-        self._reading_cell = None
+        self._clear_reading_highlights()
         self._batch_stopped = True
         self._update_batch_actions()
+
+    def _clear_reading_highlights(self) -> None:
+        remaining = list(self._reading_cells)
+        self._reading_cells.clear()
+        if not self._batch:
+            return
+        for row, column in remaining:
+            item = self._table.item(row, column - 1)
+            if item:
+                self._style_cell_item(item, row, column)
 
     def _repopulate_table_values(self) -> None:
         if not self._batch:
@@ -965,3 +1021,5 @@ class MainWindow(QMainWindow):
         self._pause_action.setEnabled(pause_enabled)
         self._resume_action.setEnabled(resume_enabled)
         self._stop_action.setEnabled(stop_enabled)
+        for action in self._concurrency_actions:
+            action.setEnabled(not running)

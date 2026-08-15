@@ -45,19 +45,19 @@ In this stage:
 ## The field table
 - Shows the ground-truth values on loading a batch.
 - Clicking a cell displays the corresponding image, with that field's view settings applied.
-- Cells that are currently being read are highlighted, as soon as the previous field has completed.
+- Cells that are currently being read are highlighted.
 - When a cell has been read, the read value is shown in that cell. If it differs from ground truth (i.e. not equal when trimmed), the font color is red.
 - If a field is deactivated, the corresponding column in the table has a light gray background.
 
 
 ## Process the imported file
-The user selects menu item **Field -> Read Batch**.
-The application runs the LLM.
-A single thread is used, so this happens sequentially.
-1. For each field in a row, the appropriate prompt is from **fields.json** is read and applied.
-2. The result is immediately written to the corresponding cell in the table. The next field is highlighted, indicating that it is next to be read.
+The user selects menu item **Run → Read Batch** (or **LLM / OCR / Chain → Read**).
+The application runs the selected reader.
+**Concurrency** sets how many field reads run at once: 1, 2, 4, 8, or 16. The last choice is restored on launch. Default is 1 (sequential).
+1. For each active field in a row, the appropriate prompt is from **fields.json** is read and applied.
+2. The result is immediately written to the corresponding cell in the table. Cells currently being read are highlighted.
 3. If the read value of any cell is not the same as the ground-truth value, its font is red.
-3. This is repeated for each row.
+4. This is repeated for each row.
 
 
 

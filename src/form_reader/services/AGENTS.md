@@ -32,6 +32,7 @@ Non-UI capabilities: EXPORT.TXT parsing, first-page image load/crop, classical O
 - Add new LLM backends as client modules with a menu prefix convention and `strip_menu_prefix`; wire in `BatchWorker` and/or `GlmOcrChain.extract_field`
 - Add new OCR engines in `OcrService.read_region` and register in `OCR_MENU_ENGINES`
 - Lazy-init heavy models (PaddleOCR) inside the service, not at import time
+- PaddleOCR init and `ocr()` are serialized with a lock (`OcrService._paddle_lock`); Tesseract may run concurrently
 - Use `should_cancel` callbacks on long HTTP calls where workers support stop/pause
 
 ## Verification
