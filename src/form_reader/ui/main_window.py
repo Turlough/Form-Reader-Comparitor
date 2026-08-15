@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+import time
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import QSettings, Qt
@@ -21,6 +25,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ..db.repository import RunStatsRepository
 from ..models.batch import Batch
 from ..models.fields_config import FieldConfig, FieldsConfig, save_fields_config
 from ..services.export_parser import parse_export_txt
@@ -40,6 +45,7 @@ from .define_fields_dialog import DefineFieldsDialog
 from .glm_ocr_batch_worker import GlmOcrBatchWorker
 from .image_panel import ImagePanel
 from .ocr_batch_worker import OcrBatchWorker
+from .stats_window import StatsWindow
 
 SETTINGS_ORG = "Digidoocs"
 SETTINGS_APP = "FormReaderComparitor"
@@ -53,6 +59,37 @@ SETTING_LAST_CONCURRENCY = "last_concurrency"
 INACTIVE_COLUMN_COLOR = QColor(235, 235, 235)
 READING_HIGHLIGHT = QColor(255, 255, 200)
 MISMATCH_COLOR = QColor(180, 0, 0)
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _RunContext:
+    method: str
+    models: str
+    worker_threads: int
+    export_path: str
+    started_at: datetime
+    started_monotonic: float
+    paused_ms: int = 0
+    pause_started: float | None = None
+
+    def mark_paused(self) -> None:
+        if self.pause_started is None:
+            self.pause_started = time.monotonic()
+
+    def mark_resumed(self) -> None:
+        if self.pause_started is None:
+            return
+        self.paused_ms += int((time.monotonic() - self.pause_started) * 1000)
+        self.pause_started = None
+
+    def duration_ms(self) -> int:
+        elapsed = int((time.monotonic() - self.started_monotonic) * 1000)
+        paused = self.paused_ms
+        if self.pause_started is not None:
+            paused += int((time.monotonic() - self.pause_started) * 1000)
+        return max(0, elapsed - paused)
 
 
 class MainWindow(QMainWindow):
@@ -85,6 +122,9 @@ class MainWindow(QMainWindow):
         self._current_field_column = 1
         self._reading_cells: set[tuple[int, int]] = set()
         self._batch_stopped = False
+        self._run_stats = RunStatsRepository()
+        self._stats_window: StatsWindow | None = None
+        self._run_context: _RunContext | None = None
 
         self._file_list = QListWidget()
         self._table = QTableWidget()
@@ -221,6 +261,11 @@ class MainWindow(QMainWindow):
         self._chain_text_cloud_submenu = self._chain_menu.addMenu("Text → Cloud")
         self._chain_image_model_actions: list[QAction] = []
         self._chain_text_model_actions: list[QAction] = []
+
+        stats_menu = bar.addMenu("&Stats")
+        self._view_stats_action = QAction("&View Stats...", self)
+        self._view_stats_action.triggered.connect(self._open_stats)
+        stats_menu.addAction(self._view_stats_action)
 
     def _wire_signals(self) -> None:
         self._file_list.currentRowChanged.connect(self._on_file_selected)
@@ -825,6 +870,7 @@ class MainWindow(QMainWindow):
             row.read_values.clear()
 
         self._repopulate_table_values()
+        self._begin_run("OCR", self._ocr_engine)
         self._worker = OcrBatchWorker(
             self._batch,
             self._ocr_engine,
@@ -859,6 +905,7 @@ class MainWindow(QMainWindow):
             row.read_values.clear()
 
         self._repopulate_table_values()
+        self._begin_run("LLM", self._model)
         self._worker = BatchWorker(
             self._batch,
             self._model,
@@ -910,6 +957,10 @@ class MainWindow(QMainWindow):
             row.read_values.clear()
 
         self._repopulate_table_values()
+        self._begin_run(
+            "Chain",
+            f"{self._chain_image_model} + {self._chain_text_model}",
+        )
         self._worker = GlmOcrBatchWorker(
             self._batch,
             self._chain_image_model,
@@ -929,11 +980,15 @@ class MainWindow(QMainWindow):
     def _pause_batch(self) -> None:
         if self._worker and self._worker.isRunning():
             self._worker.pause()
+            if self._run_context:
+                self._run_context.mark_paused()
             self._update_batch_actions(running=True, paused=True)
 
     def _resume_batch(self) -> None:
         if self._worker and self._worker.isRunning():
             self._worker.resume()
+            if self._run_context:
+                self._run_context.mark_resumed()
             self._update_batch_actions(running=True, paused=False)
 
     def _stop_batch(self) -> None:
@@ -972,10 +1027,12 @@ class MainWindow(QMainWindow):
             item.setBackground(QBrush())
 
     def _on_batch_finished(self) -> None:
+        self._record_run_stats("Completed")
         self._clear_reading_highlights()
         self._update_batch_actions()
 
     def _on_batch_stopped(self) -> None:
+        self._record_run_stats("Stopped")
         self._clear_reading_highlights()
         self._batch_stopped = True
         self._update_batch_actions()
@@ -1023,3 +1080,52 @@ class MainWindow(QMainWindow):
         self._stop_action.setEnabled(stop_enabled)
         for action in self._concurrency_actions:
             action.setEnabled(not running)
+
+    def _begin_run(self, method: str, models: str) -> None:
+        assert self._batch
+        self._run_context = _RunContext(
+            method=method,
+            models=models,
+            worker_threads=self._concurrency,
+            export_path=str(self._batch.export_path),
+            started_at=datetime.now(),
+            started_monotonic=time.monotonic(),
+        )
+
+    def _record_run_stats(self, status: str) -> None:
+        ctx = self._run_context
+        self._run_context = None
+        if ctx is None or self._batch is None:
+            return
+        cells_read, cells_accurate = self._batch.read_accuracy_counts()
+        try:
+            self._run_stats.record(
+                started_at=ctx.started_at,
+                finished_at=datetime.now(),
+                duration_ms=ctx.duration_ms(),
+                worker_threads=ctx.worker_threads,
+                method=ctx.method,
+                models=ctx.models,
+                cells_read=cells_read,
+                cells_accurate=cells_accurate,
+                status=status,
+                export_path=ctx.export_path,
+            )
+        except Exception:
+            logger.exception("Failed to record run statistics")
+            QMessageBox.warning(
+                self,
+                "Stats",
+                "The batch finished, but run statistics could not be saved.",
+            )
+        if self._stats_window is not None:
+            self._stats_window.refresh()
+
+    def _open_stats(self) -> None:
+        if self._stats_window is None:
+            self._stats_window = StatsWindow(self._run_stats, parent=self)
+        else:
+            self._stats_window.refresh()
+        self._stats_window.show()
+        self._stats_window.raise_()
+        self._stats_window.activateWindow()

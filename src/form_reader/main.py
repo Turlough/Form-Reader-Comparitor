@@ -6,6 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
+from .db import init_db
 from .ui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,16 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("Form Reader Comparator")
     app.setOrganizationName("Digidoocs")
+    try:
+        init_db()
+    except Exception as exc:
+        logger.exception("Failed to initialize stats database")
+        QMessageBox.warning(
+            None,
+            "Stats database",
+            "Could not initialize the stats database. "
+            f"Runs will not be recorded.\n\n{exc}",
+        )
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

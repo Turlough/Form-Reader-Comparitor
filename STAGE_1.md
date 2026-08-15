@@ -59,8 +59,14 @@ The application runs the selected reader.
 3. If the read value of any cell is not the same as the ground-truth value, its font is red.
 4. This is repeated for each row.
 
+## Stats
+Menu item **Stats → View Stats** opens a window listing recorded runs.
 
+Each finished or stopped batch read is stored in SQLite:
+- Worker thread count (Concurrency)
+- Method (LLM, OCR, or Chain) and model(s)
+- Number of cells read
+- Number of cells read accurately (trim, ignore case)
+- Time taken (pause time excluded)
 
-
-
-
+The stats table is sortable. Each column has a filter box (type or pick a value).

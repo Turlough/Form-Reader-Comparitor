@@ -76,6 +76,8 @@ Avoid double-counting: store **two** timing blocks per run when “Both”, or d
 
 - **SQLite** as primary store.
 
+Stage 1 already persists **run-level statistics** (`run_stats`: workers, method/models, cells read, case-insensitive accurate count, duration, status) via Alembic — see `src/form_reader/db/AGENTS.md`. That table is not the Stage 2 schema below.
+
 **Suggested logical entities**
 
 - **Batches:** id, imported_at, CSV path/description, dialect notes, optional column alias map JSON.

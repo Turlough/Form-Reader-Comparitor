@@ -52,3 +52,14 @@ class Batch:
     @property
     def fields_json_path(self) -> Path:
         return self.batch_dir / "fields.json"
+
+    def read_accuracy_counts(self) -> tuple[int, int]:
+        """Return (cells_read, cells_accurate) using case-insensitive trim compare."""
+        cells_read = 0
+        cells_accurate = 0
+        for row in self.rows:
+            for column in row.read_values:
+                cells_read += 1
+                if row.values_match(column):
+                    cells_accurate += 1
+        return cells_read, cells_accurate

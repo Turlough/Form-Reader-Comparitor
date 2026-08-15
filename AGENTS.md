@@ -5,14 +5,14 @@
 
 ## Repository purpose
 
-PyQt6 desktop app that compares **form-reading techniques** against ground-truth batches indexed by **EXPORT.TXT**. Stage 1 (current): single-batch evaluation with vision LLMs (Ollama), optional OCR engines (Paddle, Tesseract), and a **glm-ocr chain** (OCR pass + text model for field extraction). Stage 2 (planned): SQLite persistence, multi-reader runs, Levenshtein scoring, web NL analytics — see `PLAN.md`.
+PyQt6 desktop app that compares **form-reading techniques** against ground-truth batches indexed by **EXPORT.TXT**. Stage 1 (current): single-batch evaluation with vision LLMs (Ollama), optional OCR engines (Paddle, Tesseract), a **glm-ocr chain** (OCR pass + text model for field extraction), and **run statistics** in versioned SQLite (Alembic). Stage 2 (planned): full result persistence, multi-reader runs, Levenshtein scoring, web NL analytics — see `PLAN.md`.
 
 Terminology: `GLOSSARY.md` (batch, index, ground truth, EXPORT.TXT). Stage 1 UX spec: `STAGE_1.md`.
 
 ## Project layout
 
 - Entry: repo-root `main.py` delegates to `form_reader.main:main`; CLI script `form-reader` from `pyproject.toml`
-- Package: `src/form_reader/` — `main.py`, `models/`, `services/`, `ui/`
+- Package: `src/form_reader/` — `main.py`, `models/`, `services/`, `db/`, `ui/`
 - Durable docs at repo root: `README.md`, `PLAN.md`, `STAGE_1.md`, `GLOSSARY.md`, `RUNPOD.md`
 - Dependencies: [uv](https://docs.astral.sh/uv/) (`pyproject.toml`, `uv.lock`); run `uv sync` after clone or dependency changes
 - Config: `.env` at repo root (template `env.example`); loaded from package dir or ancestors in `form_reader.main`
@@ -25,6 +25,7 @@ Terminology: `GLOSSARY.md` (batch, index, ground truth, EXPORT.TXT). Stage 1 UX 
 - `RUNPOD_HOST`, `RUNPOD_MODEL` — RunPod GPU pod OpenAI proxy (menu prefix `runpod:`); optional `RUNPOD_ENDPOINT_ID` + `RUNPOD_API_KEY` for serverless; operator notes in `RUNPOD.md`
 - `GLM_OCR_MODEL`, `GLM_OCR_PROMPT` — vision OCR model and prompt for glm-ocr chain
 - `TESSERACT_CMD` — optional path to tesseract binary (Windows auto-discovery otherwise)
+- `FORM_READER_DB` — optional SQLite path for run statistics (default: app data `Digidoocs/FormReaderComparitor/form_reader.db`)
 
 ### Batch workflow (Stage 1)
 
@@ -32,12 +33,13 @@ Terminology: `GLOSSARY.md` (batch, index, ground truth, EXPORT.TXT). Stage 1 UX 
 2. **Fields → Define** — field names, LLM prompts, active/inactive, per-field view settings; persisted as `fields.json` beside EXPORT.TXT
 3. **LLM** menu — choose Ollama model, Gemini, LM Studio, RunPod, OCR engine, or glm-ocr chain (`glmocr:<text_model>`)
 4. **Run → Read Batch** (or LLM/OCR/Chain → Read) — field reads run with **Concurrency** (1, 2, 4, 8, or 16); table shows ground truth then read values; mismatches in red; inactive columns gray
+5. **Stats → View Stats** — each finished or stopped run is recorded (workers, method/models, cells read, case-insensitive accurate count, pause-excluded duration); the stats window supports per-column filtering
 
 ### Conventions
 
 - Follow conventional commits; reference GitLab issues with `#<number>`
 - Reader/extraction backends live in `services/`; UI workers in `ui/` must not embed provider HTTP details
-- Future Stage 2 `Reader` protocol and SQLite schema belong in `PLAN.md` until implemented — do not assume they exist in code yet
+- Run statistics live in `db/` (`run_stats` via Alembic). The Stage 2 `Reader` protocol and full result schema stay in `PLAN.md` until implemented — do not assume they exist in code yet
 
 ## Core Contract
 
@@ -113,11 +115,12 @@ Default section order:
 
 ## User Preferences
 
-When the user requests a durable behavior change, record it here or in the relevant child AGENTS.md
+- Persist each batch run in SQLite: worker thread count, method/models, cells read, cells accurate (case-insensitive trim), and duration excluding pause time. **Stats → View Stats** opens a table with per-column filters.
 
 ## Child DOX Index
 
 - `src/form_reader/AGENTS.md` — Python package: entrypoint, batch import, field config, orchestration
   - `src/form_reader/models/AGENTS.md` — batch rows, field config schema, `fields.json`
   - `src/form_reader/services/AGENTS.md` — EXPORT parsing, image load, OCR and LLM clients, glm-ocr chain, RunPod
-  - `src/form_reader/ui/AGENTS.md` — PyQt6 main window, panels, dialogs, batch workers
+  - `src/form_reader/db/AGENTS.md` — SQLite run statistics, Alembic migrations, `RunStatsRepository`
+  - `src/form_reader/ui/AGENTS.md` — PyQt6 main window, panels, dialogs, batch workers, stats window
